@@ -21,16 +21,54 @@ measurement, and it is safe in the conservative direction: if the index is
 actually UTC, the recorded availability time is later than the truth, which
 delays a feature rather than leaking one.
 
-**Interval labelling is settled by reconciliation, not by documentation.** The
-NEM convention is that `SETTLEMENTDATE` labels the *end* of its interval, but
-NEMWeb lists some DISPATCHIS files before the timestamp they carry. Rather than
-pick a reading, `verify_formats.py` averages six parsed five-minute prices and
-compares them against AEMO's separately published aggregated series; the
-alignment that reconciles is the one recorded, and every lag is defined against
-it.
+**`SETTLEMENTDATE` labels the end of its interval.** Confirmed 18 Aug 2026, not
+assumed: a DISPATCHIS row stamped `00:50:00` came from a solve whose C header
+was written at `00:45:13`. The solve ran at the interval's start and the row
+carries its end.
 
 Read the wrong way, a five-minute label shifts every price lag by one interval,
 in the direction that makes the model look better than it is.
+
+## A dispatch price is set before its interval, not measured after it
+
+This is the piece of market mechanics that shapes the target variable, and it
+looks like a bug until it clicks.
+
+AEMO does not observe five minutes of trading and then compute a price. It runs
+a dispatch solve at the *start* of each interval, choosing which generators run
+at what output, and the price that solve produces is the price the interval
+settles at. So for the interval
+ending 00:50 — covering 00:45 to 00:50 — the solve ran at 00:45:13, the file
+appeared on NEMWeb at 00:48, and the price applies to five minutes that are
+still running. The file is published two minutes before the timestamp it
+carries, which is correct rather than anomalous.
+
+**The consequence is a constraint on the label, and it is not covered by PLAN
+§4.1, which deals only with features.** At prediction time `t`, the price of
+the interval ending around `t+2` has already been published. A target defined
+as *any spike in `(t, t+30min]`* therefore contains one interval whose answer
+is already sitting in the raw tables. Nothing in a feature-side leakage test
+would catch it, because the leak is in the target.
+
+So: the target window covers only intervals whose DISPATCHIS was **not**
+published at or before `t` — in practice, intervals ending in
+`(t+5min, t+35min]`, filtered on `_known_at > t` rather than on
+`SETTLEMENTDATE`. `tests/test_no_leakage.py` on Day 4 asserts this alongside
+the feature-side condition.
+
+## Interval resolution changed under us
+
+AEMO's aggregated price and demand series is **five-minute**, not thirty, for
+any month after five-minute settlement began in October 2021 — the August 2026
+file holds 4,896 rows for seventeen days, which is 288 per day. Earlier months
+are half-hourly.
+
+Two things follow. The long history is richer than PLAN §2.2 assumed, since
+price and demand are available at five minutes for roughly five years rather
+than thirteen months; only the full MMS feeds are limited to the archive
+window. And any code reading these files must **detect** the spacing per file
+instead of assuming it, because a backfill spanning October 2021 crosses the
+change.
 
 ## Vintage — when a row became knowable
 

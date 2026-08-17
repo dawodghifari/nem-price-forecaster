@@ -215,7 +215,7 @@ def _record_ingest(
                 "sha256": vintage.sha256,
                 "tables_loaded": json.dumps(written),
                 "anomalies": json.dumps(anomalies),
-                "row_count_ok": parsed.row_count_matches,
+                "row_count_ok": parsed.record_count_matches,
             },
         )
 

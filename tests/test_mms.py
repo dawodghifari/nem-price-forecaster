@@ -46,9 +46,21 @@ def test_header_and_footer():
     assert parsed.header.report_id == "DISPATCHIS"
     assert parsed.header.generated_at_local == datetime(2026, 8, 17, 20, 8, 0)
     assert parsed.header.serial == "0000000533127148"
-    assert parsed.declared_row_count == 4
     assert parsed.observed_row_count == 4
-    assert parsed.row_count_matches is True
+
+
+def test_footer_counts_every_record_not_just_data_rows():
+    """4 D rows + 2 I records + 2 C records = 8, which is what the footer says.
+
+    Measured on live files 18 Aug 2026: a DISPATCHIS footer claiming 997 held
+    988 D rows across 7 tables (988 + 7 + 2 = 997), and a P5MIN footer claiming
+    11766 held 11759 across 5 (11759 + 5 + 2 = 11766).
+    """
+    parsed = parse_mms_text(SAMPLE.replace('C,"END OF REPORT",4', 'C,"END OF REPORT",8'))
+    assert parsed.observed_row_count == 4
+    assert parsed.observed_record_count == 8
+    assert parsed.declared_record_count == 8
+    assert parsed.record_count_matches is True
 
 
 def test_intervention_rows_are_kept_not_merged():
@@ -122,7 +134,7 @@ def test_data_without_a_header_is_flagged_not_silently_dropped():
 
 def test_footer_mismatch_is_detected():
     text = SAMPLE.replace('C,"END OF REPORT",4', 'C,"END OF REPORT",99')
-    assert parse_mms_text(text).row_count_matches is False
+    assert parse_mms_text(text).record_count_matches is False
 
 
 def test_missing_table_error_lists_what_is_present():

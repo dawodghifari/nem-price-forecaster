@@ -4,7 +4,9 @@ An MMS file is not a CSV with a header. It is a stream of records whose first
 field states the record type:
 
     C  comment. The first line is the file header; the last line is a footer
-       carrying the number of data rows the file claims to hold.
+       carrying the number of *records* the file claims to hold — every C, I
+       and D line, not just the data rows. Confirmed against live files on
+       18 Aug 2026; see `MMSFile.record_count_matches`.
     I  information. Declares a table and *is* that table's header row.
     D  data. One row belonging to the most recently declared table with the
        same (namespace, table, version) key.
@@ -87,7 +89,8 @@ class MMSFile:
 
     header: MMSHeader
     tables: dict[TableKey, pd.DataFrame]
-    declared_row_count: int | None = None
+    declared_record_count: int | None = None
+    observed_record_count: int = 0
     observed_row_count: int = 0
     anomalies: list[MMSAnomaly] = field(default_factory=list)
     source_name: str | None = None
@@ -129,11 +132,22 @@ class MMSFile:
         )
 
     @property
-    def row_count_matches(self) -> bool | None:
-        """Whether the footer's claimed row count matches what was parsed."""
-        if self.declared_row_count is None:
+    def record_count_matches(self) -> bool | None:
+        """Whether the footer's count matches every record parsed.
+
+        The footer counts **all** records — the C header, every I record, every
+        D record, and the footer itself — not just data rows. Measured on live
+        files 18 Aug 2026: a DISPATCHIS footer claiming 997 held 988 D rows
+        across 7 tables, and 988 + 7 + 2 = 997. A P5MIN footer claiming 11766
+        held 11759 D rows across 5 tables, and 11759 + 5 + 2 = 11766.
+
+        Reading it as a data-row count makes every well-formed file look
+        corrupt, which would have trained us to ignore the one integrity check
+        the format hands us for free.
+        """
+        if self.declared_record_count is None:
             return None
-        return self.declared_row_count == self.observed_row_count
+        return self.declared_record_count == self.observed_record_count
 
 
 def _parse_header(row: list[str]) -> MMSHeader:
@@ -175,12 +189,14 @@ def parse_mms(lines: Iterable[str], source_name: str | None = None) -> MMSFile:
     anomalies: list[MMSAnomaly] = []
     declared: int | None = None
     observed = 0
+    records = 0
     seen_file_header = False
 
     for line_no, row in enumerate(csv.reader(lines), start=1):
         if not row or not row[0].strip():
             continue
         kind = row[0].strip().upper()
+        records += 1
 
         if kind == "C":
             if not seen_file_header:
@@ -191,7 +207,7 @@ def parse_mms(lines: Iterable[str], source_name: str | None = None) -> MMSFile:
                     declared = int(row[2].strip())
                 except (ValueError, IndexError):
                     anomalies.append(
-                        MMSAnomaly(line_no, "bad_footer", f"unreadable row count: {row[2:]!r}")
+                        MMSAnomaly(line_no, "bad_footer", f"unreadable record count: {row[2:]!r}")
                     )
             continue
 
@@ -246,16 +262,18 @@ def parse_mms(lines: Iterable[str], source_name: str | None = None) -> MMSFile:
     parsed = MMSFile(
         header=header,
         tables=tables,
-        declared_row_count=declared,
+        declared_record_count=declared,
+        observed_record_count=records,
         observed_row_count=observed,
         anomalies=anomalies,
         source_name=source_name,
     )
-    if parsed.row_count_matches is False:
+    if parsed.record_count_matches is False:
         log.warning(
-            "%s: footer claims %s data rows, parsed %s",
+            "%s: footer claims %s records, parsed %s (%s data rows)",
             source_name,
             declared,
+            records,
             observed,
         )
     return parsed

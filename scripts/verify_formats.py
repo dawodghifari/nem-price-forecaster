@@ -63,7 +63,7 @@ class Report:
         return body
 
     def render(self, generated_at: datetime) -> str:
-        stamp = generated_at.strftime("%d %b %Y %H:%M timezone.utc")
+        stamp = generated_at.strftime("%d %b %Y %H:%M UTC")
         out = [
             "# Day 1 — MMS format findings",
             "",
@@ -145,7 +145,9 @@ def check_dispatchis(client: NemwebClient, data_dir: Path, region: str, report: 
         f"Listed on NEMWeb at: {_fmt(entry.listed_at_utc)}",
         f"C header generated at: "
         f"{_fmt(parsed.header.generated_at_local.replace(tzinfo=NEM_TZ)) if parsed.header.generated_at_local else UNRESOLVED}",
-        f"Footer row count matches parsed rows: {parsed.row_count_matches}",
+        f"Footer record count matches: {parsed.record_count_matches} "
+        f"({parsed.declared_record_count} declared, {parsed.observed_record_count} parsed, "
+        f"of which {parsed.observed_row_count} are data rows)",
         "",
         "Tables present:",
         "",
@@ -173,25 +175,50 @@ def check_dispatchis(client: NemwebClient, data_dir: Path, region: str, report: 
     if settlement and entry.listed_at_utc:
         try:
             sd = datetime.strptime(str(settlement), "%Y/%m/%d %H:%M:%S").replace(tzinfo=NEM_TZ)
-            delta = (entry.listed_at_utc - sd).total_seconds() / 60
+            listed_delta = (entry.listed_at_utc - sd).total_seconds() / 60
             body.append(
-                f"The file was listed {delta:+.0f} minutes relative to its own SETTLEMENTDATE."
+                f"The file was listed {listed_delta:+.0f} minutes relative to its own "
+                f"SETTLEMENTDATE."
             )
-            if delta < 0:
+
+            generated = parsed.header.generated_at_local
+            if generated is not None:
+                gen = generated.replace(tzinfo=NEM_TZ)
+                gen_delta = (gen - sd).total_seconds() / 60
                 body += [
                     "",
-                    "The file appears **before** the timestamp it carries. Under the",
-                    "interval-ending convention a settled price cannot be published before its",
-                    "interval has finished, so either the label is interval-beginning here, or",
-                    "the published value is a dispatch solution for the interval about to run.",
-                    "Section 5 below settles this by reconciling against the aggregated series.",
+                    f"The dispatch solve that produced it ran {gen_delta:+.1f} minutes relative "
+                    f"to the same SETTLEMENTDATE, at `{gen:%H:%M:%S}`.",
+                    "",
                 ]
-            else:
-                body.append("")
-                body.append(
-                    "The file appears after its own SETTLEMENTDATE, consistent with the "
-                    "interval-ending convention."
-                )
+                if -5.5 < gen_delta < -4.0:
+                    body += [
+                        "**This settles the labelling.** The solve ran at the *start* of a "
+                        "five-minute interval and the row is stamped with the interval's *end*, "
+                        "so `SETTLEMENTDATE` is **interval-ending**.",
+                        "",
+                        "It also explains why the file appears before the timestamp it carries, "
+                        "which looks wrong at first glance. A dispatch price is not measured "
+                        "after the fact — it is the output of a solve run at the start of the "
+                        "interval, which sets the price that interval will settle at. So the "
+                        "price for the interval ending 00:50 is determined at 00:45, published "
+                        "around 00:48, and applies to the five minutes that are still running.",
+                        "",
+                        "**Consequence for the label, which is not covered by PLAN §4.1.** At "
+                        "prediction time `t` the price of the interval ending roughly `t+2` has "
+                        "already been published. A target defined as *any spike in "
+                        "`(t, t+30min]`* therefore includes one interval whose answer is already "
+                        "known. The target window must be defined over intervals whose DISPATCHIS "
+                        "was **not** published at or before `t`, and Day 4's leakage test must "
+                        "assert that as well as the feature-side condition.",
+                    ]
+                else:
+                    body += [
+                        f"**{UNRESOLVED}**: the solve time sits {gen_delta:+.1f} minutes from "
+                        "SETTLEMENTDATE, which matches neither a solve at the interval start "
+                        "(about -5) nor one at the interval end (about 0). Do not define lags "
+                        "until this is understood.",
+                    ]
         except ValueError:
             body.append(f"Could not parse SETTLEMENTDATE `{settlement}`.")
 
@@ -319,8 +346,14 @@ def check_reconciliation(client: NemwebClient, data_dir: Path, region: str, repo
 
     This is the check that makes Day 1's exit condition testable. Matching a
     column name proves nothing; matching a number AEMO published through a
-    different pipeline proves the right column was read, and the alignment that
-    makes it match also settles the interval-labelling question.
+    different pipeline proves the right column was read.
+
+    It does *not* settle interval labelling whenever the aggregated series is
+    itself five-minute, which it has been since five-minute settlement began in
+    October 2021: with one dispatch interval per aggregated period, the
+    interval-ending and interval-beginning candidate sets are the same set, and
+    a comparison that cannot fail proves nothing. The labelling question is
+    answered in the DISPATCHIS section instead, from the solve time.
     """
     body = report.section("Reconciliation against the aggregated price series")
 
@@ -412,15 +445,28 @@ def check_reconciliation(client: NemwebClient, data_dir: Path, region: str, repo
         f"Aggregated period ending `{end}`: published RRP **{published:.2f}** $/MWh",
         f"Mean of {len(prices)} parsed 5-minute RRP values: **{computed:.2f}** $/MWh",
         f"Difference: {diff:+.4f}",
-        f"Alignment that reconciles: **{alignment}**",
         "",
         f"Parsed values: `{[round(p, 2) for p in prices]}`",
         "",
     ]
-    if matched:
+    if matched and per_period > 1:
         body += [
-            "**Reconciled.** The parser reads the settlement price AEMO publishes, and the",
-            f"aggregated timestamp is {alignment}. Every downstream lag is defined against this.",
+            "**Reconciled.** The parser reads the settlement price AEMO publishes through a",
+            f"separate pipeline, and the alignment that makes {per_period} five-minute values",
+            f"average to the published figure is **{alignment}**.",
+        ]
+    elif matched:
+        body += [
+            "**Reconciled on the value.** The parser reads the settlement price AEMO publishes",
+            "through a separate pipeline, which is what this check exists to prove.",
+            "",
+            "**It says nothing about interval alignment.** The aggregated series is itself",
+            "five-minute, so one dispatch interval maps to one aggregated period and the two",
+            "candidate alignments are the same single interval. A test that cannot fail is not",
+            "evidence. The labelling question is answered in the DISPATCHIS section above, from",
+            "the solve time, and can be confirmed here during the Day 2 backfill by running the",
+            "same check against a month from before five-minute settlement, when the aggregated",
+            "series was half-hourly and six values had to average correctly.",
         ]
     else:
         body += [
