@@ -1,0 +1,33 @@
+# Data is never committed. Reproduce it with `make backfill`.
+data/
+*.zip
+*.CSV
+*.parquet
+
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+.coverage
+htmlcov/
+
+# dbt (added Day 3)
+target/
+dbt_packages/
+logs/
+
+# MLflow (added Phase 3)
+mlruns/
+mlartifacts/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

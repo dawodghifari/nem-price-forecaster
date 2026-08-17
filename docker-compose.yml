@@ -1,0 +1,39 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: nemfc-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-nemfc}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nemfc}
+      POSTGRES_DB: ${POSTGRES_DB:-nemfc}
+      # The database stores every timestamp in UTC. NEM local time (AEST,
+      # UTC+10, no daylight saving) is converted on the way in. See
+      # docs/CONVENTIONS.md.
+      TZ: UTC
+      PGTZ: UTC
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nemfc} -d ${POSTGRES_DB:-nemfc}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  adminer:
+    image: adminer:4
+    container_name: nemfc-adminer
+    ports:
+      - "${ADMINER_PORT:-8080}:8080"
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:

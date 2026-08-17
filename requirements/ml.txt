@@ -1,0 +1,15 @@
+# Modelling stack. Installed from Day 6, kept out of base.txt so the ingestion
+# and serving path stays small.
+#
+# Airflow is deliberately absent from every file here. It arrives in Phase 5
+# with its own image and its own pinned constraints, because Airflow's
+# constraint set does not resolve against a current LightGBM and MLflow
+# environment. Sharing one virtualenv between them is a day lost to pip.
+
+-r base.txt
+
+lightgbm==4.5.0
+scikit-learn==1.5.2
+mlflow==2.17.2
+shap==0.46.0
+matplotlib==3.9.2

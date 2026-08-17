@@ -1,0 +1,12 @@
+# Runtime dependencies for ingestion and serving.
+# Deliberately small. The modelling stack lives in ml.txt and Airflow lives in
+# its own image, because Airflow's constraints file does not co-resolve with a
+# current LightGBM/MLflow environment.
+
+httpx==0.27.2
+tenacity==9.0.0
+pandas==2.2.3
+pyarrow==17.0.0
+SQLAlchemy==2.0.36
+psycopg[binary]==3.2.3
+python-dotenv==1.0.1
