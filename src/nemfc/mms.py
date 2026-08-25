@@ -33,7 +33,7 @@ import io
 import logging
 import re
 import zipfile
-from collections.abc import Iterable, Iterator
+from collections.abc import Collection, Iterable, Iterator
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -176,13 +176,44 @@ def _parse_header(row: list[str]) -> MMSHeader:
     return header
 
 
-def parse_mms(lines: Iterable[str], source_name: str | None = None) -> MMSFile:
+def _filter_lines(lines: Iterable[str], wanted: Collection[str], counter: list[int]):
+    """Drop D records for unwanted tables before paying for CSV parsing.
+
+    A P5MIN file is 11,759 data rows of which 11,508 are constraint solutions
+    the model never reads, so parsing every one costs about an hour of CPU
+    across a thirteen-month backfill for nothing. The first four fields of a
+    record — type, namespace, table, version — are never quoted, so a plain
+    `split` decides whether a line is worth the CSV machinery.
+
+    Skipped lines are counted, so the footer integrity check still works.
+    """
+    for line in lines:
+        if line[:2] == "D,":
+            parts = line.split(",", 3)
+            if len(parts) > 2 and parts[2].strip().upper() not in wanted:
+                counter[0] += 1
+                continue
+        yield line
+
+
+def parse_mms(
+    lines: Iterable[str],
+    source_name: str | None = None,
+    tables: Collection[str] | None = None,
+) -> MMSFile:
     """Parse MMS records into one dataframe per table.
 
     Every value stays a string. Typing happens in the dbt staging layer, so
     that the raw layer is a faithful record of what AEMO published and a type
     change never loses data at ingest time.
+
+    `tables` restricts which tables' data rows are kept, by table name and
+    ignoring version. Headers for every table are still read, so the file's
+    full inventory stays visible in logs even when most of it is discarded.
     """
+    skipped = [0]
+    if tables is not None:
+        lines = _filter_lines(lines, {t.upper() for t in tables}, skipped)
     header = MMSHeader()
     headers: dict[TableKey, list[str]] = {}
     rows: dict[TableKey, list[list[str | None]]] = {}
@@ -263,24 +294,28 @@ def parse_mms(lines: Iterable[str], source_name: str | None = None) -> MMSFile:
         header=header,
         tables=tables,
         declared_record_count=declared,
-        observed_record_count=records,
+        observed_record_count=records + skipped[0],
         observed_row_count=observed,
         anomalies=anomalies,
         source_name=source_name,
     )
     if parsed.record_count_matches is False:
         log.warning(
-            "%s: footer claims %s records, parsed %s (%s data rows)",
+            "%s: footer claims %s records, parsed %s (%s data rows kept)",
             source_name,
             declared,
-            records,
+            records + skipped[0],
             observed,
         )
     return parsed
 
 
-def parse_mms_text(text: str, source_name: str | None = None) -> MMSFile:
-    return parse_mms(io.StringIO(text), source_name=source_name)
+def parse_mms_text(
+    text: str,
+    source_name: str | None = None,
+    tables: Collection[str] | None = None,
+) -> MMSFile:
+    return parse_mms(io.StringIO(text), source_name=source_name, tables=tables)
 
 
 def _iter_csv_members(zf: zipfile.ZipFile, prefix: str = "") -> Iterator[tuple[str, bytes]]:
@@ -301,22 +336,39 @@ def _iter_csv_members(zf: zipfile.ZipFile, prefix: str = "") -> Iterator[tuple[s
             yield name, payload
 
 
-def read_mms_zip(source: str | Path | IO[bytes]) -> list[MMSFile]:
+def iter_mms_zip(
+    source: str | Path | IO[bytes],
+    tables: Collection[str] | None = None,
+) -> Iterator[MMSFile]:
+    """Yield each MMS file inside a zip, one at a time.
+
+    A daily archive rollup holds 288 members. Yielding them lets the caller
+    load and release each one instead of holding a day in memory.
+    """
+    label = str(source) if isinstance(source, (str, Path)) else "<stream>"
+    for name, payload in _iter_csv_members(zipfile.ZipFile(source)):
+        text = payload.decode("utf-8", errors="replace")
+        yield parse_mms_text(text, source_name=f"{Path(label).name}!{name}", tables=tables)
+
+
+def read_mms_zip(
+    source: str | Path | IO[bytes],
+    tables: Collection[str] | None = None,
+) -> list[MMSFile]:
     """Parse every MMS file inside a zip, including nested archive rollups."""
     label = str(source) if isinstance(source, (str, Path)) else "<stream>"
-    parsed: list[MMSFile] = []
-    with zipfile.ZipFile(source) as zf:
-        for name, payload in _iter_csv_members(zf):
-            text = payload.decode("utf-8", errors="replace")
-            parsed.append(parse_mms_text(text, source_name=f"{Path(label).name}!{name}"))
+    parsed = list(iter_mms_zip(source, tables=tables))
     if not parsed:
         raise ValueError(f"no MMS members found in {label}")
     return parsed
 
 
-def read_mms_zip_single(source: str | Path | IO[bytes]) -> MMSFile:
+def read_mms_zip_single(
+    source: str | Path | IO[bytes],
+    tables: Collection[str] | None = None,
+) -> MMSFile:
     """Parse a zip expected to hold exactly one MMS file."""
-    files = read_mms_zip(source)
+    files = read_mms_zip(source, tables=tables)
     if len(files) != 1:
         names = ", ".join(f.source_name or "?" for f in files)
         raise ValueError(f"expected one MMS member, found {len(files)}: {names}")

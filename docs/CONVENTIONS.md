@@ -97,6 +97,136 @@ So nothing is updated in place. A revision arrives as a new file, gets a new
 `_source_file`, and lands as new rows. The primary key is
 `(_source_file, _row_ordinal)`, which makes re-running a file a no-op.
 
+## A backfilled vintage is weaker than a live one, and says so
+
+A live download knows when a file appeared in the NEMWeb index, to the minute.
+The archive publishes one zip per day the following morning, so per-interval
+listing times are gone and only the generation timestamp inside each member
+survives.
+
+Since P5MIN publication ran 7.5 minutes behind generation at the median and 23
+minutes at the tail, treating a backfilled row as knowable at its generation
+time would make the training set optimistic by that much — and the model would
+then meet a live feed where the same feature arrives later than it did in
+training.
+
+So archive-sourced rows get generation time plus the observed 90th-percentile
+lag, and carry `_vintage_source = 'archive'` so the distinction is auditable
+rather than assumed. Live rows carry `'live'` and their measured listing time.
+
+## Weather: name the model, or get observations
+
+There are two Open-Meteo products, and PLAN §4.1 correctly says to use the
+Historical Forecast API rather than the Historical Weather API, which is ERA5
+reanalysis — conditions reconstructed after the fact, and a direct leak.
+
+Choosing the right endpoint turns out not to be enough. Measured 18 Aug 2026
+over 26–28 July, mean absolute difference against ERA5 for the same 72 hours:
+
+| `models=` | vs ERA5 |
+|---|---|
+| unspecified | **0.000 °C** |
+| `ecmwf_ifs025` | 0.586 °C |
+| `icon_seamless` | 0.954 °C |
+| `gfs_seamless` | 1.018 °C |
+
+The named models disagree with each other by up to 1.519 °C, which is what
+distinct numerical weather models do. With no model named, the *forecast*
+endpoint returns reanalysis exactly — and says nothing about it in the
+response.
+
+So the leak sat one level deeper than the plan described. Someone who followed
+the plan to the letter, used the historical forecast API as instructed, and
+never passed `models=`, would have trained on observations with no way of
+knowing. `WeatherRequest.model` therefore defaults to `ecmwf_ifs025`.
+
+That the chosen model is also the closest to ERA5 is shared lineage, not
+leakage: ERA5 is ECMWF's reanalysis and IFS is ECMWF's forecast model, so they
+agree more with each other than either does with GFS. The evidence that it is a
+forecast is that its figure is not zero while the unspecified one is.
+
+## Known data gaps
+
+`make gaps` lists days where AEMO published fewer than 288 dispatch intervals.
+It excludes the first and last calendar day of coverage, which are not gaps: an
+interval stamped 00:00 covers 23:55 to midnight of the evening before and ships
+in the previous day's rollup, so the oldest day is always short by exactly that
+one and the newest holds only it.
+
+One real gap in the archive as at 24 Aug 2026:
+
+**10 March 2026 — DISPATCHIS lost 21 of 288 intervals between 18:35 and 20:25,
+in two blocks of 13 and 8 with a brief recovery between them. P5MIN lost 24
+runs the same day.** Both feeds short means an AEMO publication outage, not a
+parser fault.
+
+**The two counts differ, and that is the point.** A gap in the label does not
+imply a gap in the benchmark, or the reverse, so the feature layer excludes the
+**union** of both windows. Checking only DISPATCHIS would leave rows whose
+AEMO forecast is absent — on the single comparison the project is built around.
+
+Exclude whole windows rather than the individual missing intervals. The few
+intervals that did publish inside the outage have no usable history either
+side, so any lag or rolling feature computed on them reaches back into absent
+data.
+
+And say where it sits: 18:35 to 20:25 is the evening demand ramp, which is when
+NSW prices spike. One evening in 375 barely moves the totals, but the loss is
+not uniformly distributed and the README should not imply the training window
+is.
+
+**Joint coverage starts 13 August 2025**, not the 12th: the P5MIN archive
+begins a day after DISPATCHIS, and the usable window is bounded by the later of
+the two.
+
+A missing interval is not a value to impute past. It is a period where the
+market's state is unknown, so the feature layer refuses to emit a row whose
+window is not fully populated rather than quietly returning a number built on
+less data than it claims.
+
+## Pace, and never argue with a refusal
+
+NEMWeb is a public web server, not a metered API. AEMO grants permission to use
+the data; it does not offer a quota.
+
+Measured 18 Aug 2026: a first poller pass fetched 163 files in 52 seconds, about
+three a second, and the 164th came back 403. Two rules came out of it, and both
+are enforced in `NemwebClient`.
+
+**One request a second by default.** A full 375-day archive backfill is one
+request per day, so the pacing costs about six minutes across the whole thing.
+
+**A 4xx is never retried.** Retrying a 403 is how a rate limit turns into a
+block. A refusal raises `RateLimited`, the poller backs off for at least a
+minute and doubles up to fifteen, and `Retry-After` is honoured when sent.
+
+Most of those 163 requests were also avoidable — see the next section.
+
+## One dispatch interval, one key
+
+The same interval arrives by two routes with two different paths: live as its
+own zip, backfilled inside a daily rollup. Keyed on the full path they look
+like different files, so a poller run after a backfill re-fetched two days of
+intervals it already held.
+
+The innermost CSV name is common to both, so that is the key, and it is stored
+on `raw.ingest_log.member_key` with a unique index. It is also predictable from
+a directory listing, which is what lets a pass skip a file *before* spending a
+request on it.
+
+## Not every table gets loaded
+
+Two constraint tables — `DISPATCH.CONSTRAINT` and `P5MIN.CONSTRAINTSOLUTION` —
+are 97% and 98% of their files' rows, and across the archive they come to about
+1.35 billion rows between them. Neither feeds a Phase 1 feature: interconnector
+flows and their limits come from `DISPATCH.INTERCONNECTORRES`, which carries
+the flow and both limits directly.
+
+`src/nemfc/tables.py` holds the allowlist and the arithmetic behind it. Loading
+it produces about 8.3 million rows. The parser skips unwanted data rows before
+they reach the CSV machinery, which is the difference between minutes and hours
+across a full backfill.
+
 ## Raw tables are generated from the file
 
 Columns come from the `I` record, and the table name carries the report

@@ -29,6 +29,7 @@ import contextlib
 import hashlib
 import logging
 import re
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -171,15 +172,73 @@ def parse_directory_listing(html: str, base_url: str = BASE) -> list[NemwebFile]
     return files
 
 
-class NemwebClient:
-    """Minimal HTTP client with retries and a contactable user agent."""
+class RateLimited(Exception):
+    """NEMWeb refused a request for pace rather than for content.
 
-    def __init__(self, user_agent: str, timeout: float = 60.0) -> None:
+    Observed 18 Aug 2026: a first poller pass fetched 163 files in 52 seconds,
+    about three a second, and the 164th returned 403. AEMO publishes this data
+    for anyone to use, but it is a public web server, not an API with a quota,
+    and hammering it is both rude and a good way to get an address blocked.
+    """
+
+    def __init__(self, url: str, status: int, retry_after: float | None = None) -> None:
+        super().__init__(f"{status} for {url}")
+        self.url = url
+        self.status = status
+        self.retry_after = retry_after
+
+
+class NemwebClient:
+    """HTTP client that paces itself, retries transport faults, and stops on 4xx.
+
+    `min_interval` is the floor on the gap between requests. One second is
+    slow enough to have been fine in testing and still finishes a full
+    375-day archive backfill in about six minutes of request time, because a
+    backfill is one request per day rather than one per interval.
+    """
+
+    def __init__(
+        self,
+        user_agent: str,
+        timeout: float = 60.0,
+        min_interval: float = 1.0,
+        transport: httpx.BaseTransport | None = None,
+    ) -> None:
         self._client = httpx.Client(
             headers={"User-Agent": user_agent},
             timeout=timeout,
             follow_redirects=True,
+            transport=transport,
+            # A supplied transport is a test double; reading proxy settings out
+            # of the environment would send it somewhere real.
+            trust_env=transport is None,
         )
+        self._min_interval = max(0.0, min_interval)
+        self._last_request = 0.0
+
+    def _pace(self) -> None:
+        if self._min_interval <= 0:
+            return
+        elapsed = time.monotonic() - self._last_request
+        if elapsed < self._min_interval:
+            time.sleep(self._min_interval - elapsed)
+        self._last_request = time.monotonic()
+
+    @staticmethod
+    def _check(response: httpx.Response) -> None:
+        """Turn a refusal into the right kind of error.
+
+        A 4xx is never retried. Retrying a 403 is what turns a rate limit into
+        a ban, and retrying a 404 just wastes a request.
+        """
+        if response.status_code in (403, 429):
+            header = response.headers.get("retry-after")
+            try:
+                retry_after = float(header) if header else None
+            except ValueError:
+                retry_after = None
+            raise RateLimited(str(response.url), response.status_code, retry_after)
+        response.raise_for_status()
 
     def __enter__(self) -> NemwebClient:
         return self
@@ -191,14 +250,15 @@ class NemwebClient:
         self._client.close()
 
     @retry(
-        retry=retry_if_exception_type((httpx.HTTPError,)),
+        retry=retry_if_exception_type((httpx.TransportError,)),
         stop=stop_after_attempt(4),
         wait=wait_exponential(multiplier=2, min=2, max=30),
         reraise=True,
     )
     def _get(self, url: str) -> httpx.Response:
+        self._pace()
         response = self._client.get(url)
-        response.raise_for_status()
+        self._check(response)
         return response
 
     def list_directory(self, url: str) -> list[NemwebFile]:
@@ -221,8 +281,9 @@ class NemwebClient:
             log.debug("cached: %s", target)
             return target
         tmp = target.with_suffix(target.suffix + ".part")
+        self._pace()
         with self._client.stream("GET", entry.url) as response:
-            response.raise_for_status()
+            self._check(response)
             with tmp.open("wb") as fh:
                 for chunk in response.iter_bytes(chunk_size=1 << 16):
                     fh.write(chunk)

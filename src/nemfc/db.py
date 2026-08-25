@@ -34,7 +34,14 @@ from .mms import MMSFile, TableKey
 
 log = logging.getLogger(__name__)
 
-VINTAGE_COLUMNS = ("_source_file", "_row_ordinal", "_generated_at", "_listed_at", "_known_at")
+VINTAGE_COLUMNS = (
+    "_source_file",
+    "_row_ordinal",
+    "_generated_at",
+    "_listed_at",
+    "_known_at",
+    "_vintage_source",
+)
 
 _SAFE = re.compile(r"[^a-z0-9_]")
 
@@ -44,6 +51,7 @@ class FileVintage:
     """When a file's contents became knowable."""
 
     source_file: str
+    member_key: str | None = None
     source_url: str | None = None
     report: str | None = None
     interval_label: datetime | None = None
@@ -51,11 +59,27 @@ class FileVintage:
     listed_at: datetime | None = None
     size_bytes: int | None = None
     sha256: str | None = None
+    vintage_source: str = "live"
 
     @property
     def known_at(self) -> datetime | None:
         candidates = [t for t in (self.generated_at, self.listed_at) if t is not None]
         return max(candidates) if candidates else None
+
+
+# Postgres refuses a statement with more than 65,535 bind parameters, and
+# `method="multi"` sends chunksize x columns of them in one go. A fixed
+# chunksize is a trap here because these tables are unusually wide:
+# P5MIN.REGIONSOLUTION has 118 columns and DISPATCH.REGIONSUM has 126, so a
+# chunk of 1,000 rows would ask for roughly 124,000 parameters and fail.
+#
+# It has not fired yet only because each file holds fewer rows than the chunk
+# size. A wider table or a bigger file would break it mid-backfill, hours in.
+MAX_BIND_PARAMS = 60_000
+
+
+def safe_chunksize(columns: int) -> int:
+    return max(1, MAX_BIND_PARAMS // max(columns, 1))
 
 
 def get_engine(database_url: str) -> Engine:
@@ -88,10 +112,11 @@ def ensure_raw_table(engine: Engine, key: TableKey, columns: Iterable[str]) -> s
         {ddl_cols},
         "_source_file"  text        NOT NULL,
         "_row_ordinal"  integer     NOT NULL,
-        "_generated_at" timestamptz,
-        "_listed_at"    timestamptz,
-        "_known_at"     timestamptz,
-        "_ingested_at"  timestamptz NOT NULL DEFAULT now(),
+        "_generated_at"   timestamptz,
+        "_listed_at"      timestamptz,
+        "_known_at"       timestamptz,
+        "_vintage_source" text,
+        "_ingested_at"    timestamptz NOT NULL DEFAULT now(),
         PRIMARY KEY ("_source_file", "_row_ordinal")
     );
     """
@@ -147,6 +172,7 @@ def load_mms_file(engine: Engine, parsed: MMSFile, vintage: FileVintage) -> dict
         payload["_generated_at"] = generated
         payload["_listed_at"] = vintage.listed_at
         payload["_known_at"] = known
+        payload["_vintage_source"] = vintage.vintage_source
 
         with engine.begin() as conn:
             before = conn.execute(
@@ -165,7 +191,7 @@ def load_mms_file(engine: Engine, parsed: MMSFile, vintage: FileVintage) -> dict
             if_exists="append",
             index=False,
             method="multi",
-            chunksize=1000,
+            chunksize=safe_chunksize(len(payload.columns)),
         )
         written[table] = len(payload)
 
@@ -189,12 +215,13 @@ def _record_ingest(
             text(
                 """
                 INSERT INTO raw.ingest_log (
-                    source_file, source_url, report, interval_label,
-                    generated_at, listed_at, known_at, size_bytes, sha256,
-                    tables_loaded, anomalies, row_count_ok
+                    source_file, member_key, source_url, report, interval_label,
+                    generated_at, listed_at, known_at, vintage_source,
+                    size_bytes, sha256, tables_loaded, anomalies, row_count_ok
                 ) VALUES (
-                    :source_file, :source_url, :report, :interval_label,
-                    :generated_at, :listed_at, :known_at, :size_bytes, :sha256,
+                    :source_file, :member_key, :source_url, :report, :interval_label,
+                    :generated_at, :listed_at, :known_at, :vintage_source,
+                    :size_bytes, :sha256,
                     CAST(:tables_loaded AS jsonb), CAST(:anomalies AS jsonb), :row_count_ok
                 )
                 ON CONFLICT (source_file) DO UPDATE SET
@@ -205,12 +232,14 @@ def _record_ingest(
             ),
             {
                 "source_file": vintage.source_file,
+                "member_key": vintage.member_key,
                 "source_url": vintage.source_url,
                 "report": vintage.report or parsed.header.report_id,
                 "interval_label": vintage.interval_label,
                 "generated_at": generated,
                 "listed_at": vintage.listed_at,
                 "known_at": known,
+                "vintage_source": vintage.vintage_source,
                 "size_bytes": vintage.size_bytes,
                 "sha256": vintage.sha256,
                 "tables_loaded": json.dumps(written),

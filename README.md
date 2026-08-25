@@ -4,7 +4,7 @@ Forecasting the probability that the NSW spot electricity price exceeds
 $300/MWh in the next 30 minutes, from AEMO's live five-minute dispatch feed,
 measured against AEMO's own published pre-dispatch forecast.
 
-**Status: Day 1 of 7 in Phase 1. No model exists yet and no results are
+**Status: Day 2 of 7 in Phase 1. No model exists yet and no results are
 claimed.** The build plan, including the reasoning behind each design decision,
 is in [PLAN.md](PLAN.md).
 
@@ -30,7 +30,11 @@ point of the project.
 | NEMWeb client | Directory listings, retries, and both publication timestamps captured per file |
 | Raw schema | Postgres, append only, three vintage timestamps per row |
 | Format verification | `make verify` downloads live files and reconciles the parsed prices against AEMO's separately published series |
-| Tests | 21, offline |
+| Live poller | Ingests every file in `Reports/Current` not already loaded, so a missed pass recovers itself |
+| Archive backfill | Resumable, table-filtered, with a weaker vintage recorded for backfilled rows |
+| Long history | AEMO's aggregated series with per-file resolution detection |
+| Weather | Open-Meteo archived forecasts, strict vintage by default |
+| Tests | 54, offline |
 
 ## Running it
 
