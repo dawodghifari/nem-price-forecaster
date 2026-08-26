@@ -73,6 +73,39 @@ backfill-weather: install  ## Open-Meteo archived forecasts
 probe-weather: install  ## Check the weather archive is forecasts, not reanalysis
 	$(BIN)/python scripts/probe_weather.py
 
+DBT_VENV := .venv-dbt
+DBT_BIN := $(DBT_VENV)/bin
+DBT := cd dbt && DBT_PROFILES_DIR=. ../$(DBT_BIN)/dbt
+
+$(DBT_BIN)/dbt:
+	$(PY) -m venv $(DBT_VENV)
+	$(DBT_BIN)/pip install --upgrade pip
+	$(DBT_BIN)/pip install -r requirements/dbt.txt
+
+.PHONY: dbt-install
+dbt-install: $(DBT_BIN)/dbt  ## Create the dbt virtualenv and fetch packages
+	$(DBT) deps
+
+.PHONY: dbt-parse
+dbt-parse: dbt-install  ## Validate the project without touching the database
+	$(DBT) parse
+
+.PHONY: dbt-build
+dbt-build: dbt-install  ## Run every model and test
+	$(DBT) build
+
+.PHONY: dbt-test
+dbt-test: dbt-install  ## Run tests only
+	$(DBT) test
+
+.PHONY: dbt-fresh
+dbt-fresh: dbt-install  ## Source freshness. Warns when the poller is stopped
+	$(DBT) source freshness
+
+.PHONY: dbt-docs
+dbt-docs: dbt-install  ## Generate and serve the lineage graph
+	$(DBT) docs generate && $(DBT) docs serve
+
 .PHONY: gaps
 gaps:  ## Days AEMO published fewer than 288 intervals, excluding archive edges
 	@docker compose exec -T postgres psql -U $${POSTGRES_USER:-nemfc} -d $${POSTGRES_DB:-nemfc} \

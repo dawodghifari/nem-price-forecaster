@@ -1,0 +1,183 @@
+version: 2
+
+models:
+  - name: stg_dispatch_price
+    description: >
+      The label: what each dispatch interval settled at. Intervention runs
+      filtered to the pricing solution, revisions resolved by vintage.
+    data_tests:
+      - unique_combination:
+          combination_of_columns: [settlement_end, region_id]
+    columns:
+      - name: settlement_end
+        description: Interval end, UTC. AEMO stamps intervals with their end.
+        data_tests: [not_null]
+      - name: region_id
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['NSW1', 'VIC1', 'QLD1', 'SA1', 'TAS1']
+      - name: rrp
+        description: >
+          Regional reference price, $/MWh. The label. Prices pile up exactly at
+          the administered cap: 20300.00 to the cent in NSW1 and SA1 during
+          FY2025-26, and 23200.00 in TAS1 on 13 July 2026 after the cap
+          escalated for the new financial year. Those are the events the model
+          exists to predict, not outliers to clip.
+        data_tests:
+          - not_null
+          - accepted_range:
+              # -1000 is the market floor and is hit exactly (QLD1). The upper
+              # bound is deliberately well above the cap rather than equal to
+              # it, because the cap escalates every financial year and a bound
+              # tracking it would fail each July. 30000 still catches the error
+              # this test is for: a misread column or a factor-of-ten shift.
+              min_value: -1000
+              max_value: 30000
+      - name: intervention
+        description: >
+          Kept for auditability. Only '0' has ever appeared, so the filter
+          upstream is untested against real data -- see the model.
+        data_tests:
+          - accepted_values:
+              values: ['0']
+              config:
+                # A warning rather than an error on purpose. The day AEMO
+                # intervenes this should tell us to confirm which run settles,
+                # not stop the pipeline.
+                severity: warn
+      - name: known_at
+        description: When this row became readable. The only joinable vintage.
+        data_tests: [not_null]
+      - name: vintage_source
+        data_tests:
+          - accepted_values:
+              values: ['live', 'archive']
+
+  - name: stg_dispatch_regionsum
+    description: Regional demand and supply per dispatch interval.
+    data_tests:
+      - unique_combination:
+          combination_of_columns: [settlement_end, region_id]
+    columns:
+      - name: settlement_end
+        data_tests: [not_null]
+      - name: total_demand
+        description: >
+          Operational demand, MW. Goes negative in South Australia -- 738
+          intervals, to -311 MW -- when rooftop solar exceeds the whole state's
+          load. A real and increasingly common regime, not bad data.
+        data_tests:
+          - not_null
+          - accepted_range:
+              # Below any plausible negative demand (SA1's total load is a few
+              # thousand MW) and above any regional peak (NSW1 tops 13,147).
+              min_value: -3000
+              max_value: 20000
+      - name: local_generation_balance
+        description: >
+          available_generation minus total_demand. Negative whenever a region
+          leans on imports, which is ordinary. Real headroom needs the
+          interconnector join and belongs in the feature layer.
+      - name: known_at
+        data_tests: [not_null]
+
+  - name: stg_dispatch_interconnector
+    description: Interconnector flows, limits, and whether they bind.
+    data_tests:
+      - unique_combination:
+          combination_of_columns: [settlement_end, interconnector_id]
+    columns:
+      - name: settlement_end
+        data_tests: [not_null]
+      - name: interconnector_id
+        data_tests: [not_null]
+      - name: is_binding
+        data_tests: [not_null]
+      - name: known_at
+        data_tests: [not_null]
+
+  - name: stg_p5min_forecast
+    description: >
+      AEMO's pre-dispatch: the benchmark and a feature. Joined on known_at,
+      never run_at.
+    data_tests:
+      - unique_combination:
+          combination_of_columns: [run_at, interval_end, region_id]
+    columns:
+      - name: run_at
+        description: When AEMO made the forecast. NOT when it became readable.
+        data_tests: [not_null]
+      - name: interval_end
+        data_tests: [not_null]
+      - name: known_at
+        description: >
+          When the file appeared on NEMWeb. The only timestamp a point-in-time
+          join may use.
+        data_tests: [not_null]
+      - name: forecast_rrp
+        data_tests:
+          - not_null
+          - accepted_range:
+              min_value: -1000
+              max_value: 30000
+      - name: publish_offset
+        description: >
+          known_at minus run_at. Routinely negative, because RUN_DATETIME
+          labels the interval a run targets and AEMO generates the file about
+          four and a half minutes earlier. No test: the invariant that matters
+          -- readable never precedes generated -- holds by construction
+          upstream.
+
+  - name: stg_weather
+    description: Archived forecasts from a named weather model.
+    data_tests:
+      - unique_combination:
+          combination_of_columns: [region_id, valid_at]
+    columns:
+      - name: valid_at
+        data_tests: [not_null]
+      - name: known_at
+        data_tests: [not_null]
+      - name: source
+        description: >
+          Must name a model. Unnamed, Open-Meteo's forecast endpoint returns
+          ERA5 reanalysis, which would make every weather feature a leak.
+        data_tests: [not_null]
+
+  - name: stg_price_history
+    description: Long price and demand series for the climatology baseline only.
+    data_tests:
+      - unique_combination:
+          combination_of_columns: [region_id, settlement_end]
+    columns:
+      - name: settlement_end
+        data_tests: [not_null]
+      - name: spacing_minutes
+        description: 30 before five-minute settlement in Oct 2021, 5 after.
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: [5, 30]
+              quote: false
+
+  - name: stg_interval_completeness
+    description: >
+      Which days have a full 288 intervals in both feeds. Derived, so a new
+      AEMO outage is picked up without anyone editing a list.
+    data_tests:
+      - unique_combination:
+          combination_of_columns: [region_id, utc_date]
+    columns:
+      - name: utc_date
+        description: >
+          UTC calendar date. Not the NEM trading day, which runs 04:00 to
+          04:00 -- named honestly so nothing joins to it expecting one.
+        data_tests: [not_null]
+      - name: dispatch_intervals
+        data_tests:
+          - accepted_range:
+              min_value: 1
+              max_value: 288
+      - name: is_complete
+        data_tests: [not_null]

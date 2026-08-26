@@ -1,0 +1,31 @@
+name: nemfc
+version: "0.1.0"
+config-version: 2
+
+profile: nemfc
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+vars:
+  # Region under study. Overridable: dbt build --vars '{region: VIC1}'
+  region: "{{ env_var('NEMFC_REGION', 'NSW1') }}"
+  # Spike threshold in $/MWh. Sensitivity to this is part of the analysis, so
+  # it is a variable rather than a number written into a model.
+  spike_threshold: "{{ env_var('NEMFC_SPIKE_THRESHOLD', '300') }}"
+  # Dispatch intervals in a complete day. Used by the completeness model.
+  intervals_per_day: 288
+
+models:
+  nemfc:
+    staging:
+      # Views: staging is renaming, typing and filtering, so materialising it
+      # would double the storage for no gain. The feature table on Day 4 is
+      # where materialisation earns its keep.
+      # No +schema here. dbt appends a custom schema to the profile's, so
+      # `+schema: staging` against a profile already targeting `staging`
+      # produced `staging_staging`.
+      +materialized: view

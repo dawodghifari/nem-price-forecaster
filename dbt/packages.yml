@@ -1,0 +1,10 @@
+# Deliberately empty.
+#
+# The three generic tests this project needs -- unique_combination,
+# accepted_range and expression_is_true -- are written in macros/generic_tests.sql
+# instead of pulled from dbt_utils. That is about forty lines of SQL against a
+# dependency, a `dbt deps` step on every clean clone, and a network call at
+# build time. It also keeps the test logic readable in the repo.
+#
+# Add packages here if something genuinely non-trivial is needed later.
+packages: []

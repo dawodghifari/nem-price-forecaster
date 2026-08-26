@@ -145,6 +145,27 @@ leakage: ERA5 is ECMWF's reanalysis and IFS is ECMWF's forecast model, so they
 agree more with each other than either does with GFS. The evidence that it is a
 forecast is that its figure is not zero while the unspecified one is.
 
+## Two market behaviours that look like bugs
+
+Both were found by staging tests failing, and both are the market rather than
+the parser. Recording them so nobody later "fixes" them.
+
+**Prices pile up exactly at the administered cap.** NSW1 and SA1 top out at
+`20300.00` to the cent during FY2025-26; TAS1 reaches `23200.00` on 13 July
+2026, days into the new financial year, because the market price cap escalates
+annually. The floor behaves the same way: QLD1 bottoms at exactly `-1000.00`.
+So the extremes are not a long tail, they are a wall — 37 intervals sitting on
+it. Those are the events the model exists to predict, and clipping them would
+remove the target.
+
+Range tests are set well clear of the cap rather than equal to it, because a
+bound that tracks the cap fails every July.
+
+**South Australian demand goes negative.** 738 intervals, to −311 MW, when
+rooftop solar exceeds the entire state's load. Increasingly common as rooftop
+PV grows, and a distinct regime rather than an error: a region generating more
+than it consumes prices very differently from one that is short.
+
 ## Known data gaps
 
 `make gaps` lists days where AEMO published fewer than 288 dispatch intervals.

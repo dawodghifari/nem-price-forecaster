@@ -18,10 +18,12 @@ venv/
 .coverage
 htmlcov/
 
-# dbt (added Day 3)
+# dbt
 target/
 dbt_packages/
 logs/
+.venv-dbt/
+.user.yml
 
 # MLflow (added Phase 3)
 mlruns/

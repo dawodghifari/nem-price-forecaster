@@ -1,0 +1,15 @@
+# Kept in the repo rather than ~/.dbt so a clean clone runs. No secrets here:
+# every value comes from the environment, with the same defaults as .env.example.
+nemfc:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: "{{ env_var('POSTGRES_HOST', 'localhost') }}"
+      port: "{{ env_var('POSTGRES_PORT', '5432') | int }}"
+      user: "{{ env_var('POSTGRES_USER', 'nemfc') }}"
+      password: "{{ env_var('POSTGRES_PASSWORD', 'nemfc') }}"
+      dbname: "{{ env_var('POSTGRES_DB', 'nemfc') }}"
+      schema: staging
+      threads: 4
+      keepalives_idle: 0

@@ -1,0 +1,73 @@
+version: 2
+
+sources:
+  - name: raw
+    description: >
+      Exactly what AEMO published, every column text, append only. Table names
+      carry the MMS report version, so a column-set change from AEMO produces a
+      new table rather than a shifted column.
+    schema: raw
+    tables:
+      - name: dispatch_price_v5
+        description: >
+          The label. RRP is the regional reference price used for settlement;
+          ROP is what the solve produced before any intervention adjustment.
+        loaded_at_field: _known_at
+        freshness:
+          # A stopped poller should say so without shouting. The archive lags a
+          # day, so a warn at one hour catches a poller that died mid-session
+          # and an error at a day catches a feed that is genuinely gone. These
+          # will warn whenever the poller is not running, which is the test
+          # working rather than failing.
+          warn_after: {count: 1, period: hour}
+          error_after: {count: 24, period: hour}
+
+      - name: dispatch_regionsum_v9
+        description: Regional demand and supply for each dispatch interval.
+        loaded_at_field: _known_at
+        freshness:
+          warn_after: {count: 1, period: hour}
+          error_after: {count: 24, period: hour}
+
+      - name: dispatch_interconnectorres_v3
+        description: >
+          Interconnector flows and limits. MARGINALVALUE is non-zero when the
+          interconnector is binding, which is the constraint signal without
+          loading the 104-million-row constraint table.
+        loaded_at_field: _known_at
+
+      - name: dispatch_case_solution_v2
+        description: One row per dispatch run. Used for run metadata and completeness.
+        loaded_at_field: _known_at
+
+      - name: p5min_regionsolution_v10
+        description: >
+          AEMO's own five-minute pre-dispatch forecast -- both a model feature
+          and the benchmark the project is measured against. Carries RUN_DATETIME
+          (when the run was made) and INTERVAL_DATETIME (what it forecasts).
+        loaded_at_field: _known_at
+        freshness:
+          warn_after: {count: 1, period: hour}
+          error_after: {count: 24, period: hour}
+
+      - name: p5min_casesolution_v2
+        description: One row per pre-dispatch run.
+        loaded_at_field: _known_at
+
+      - name: aggregated_price_demand
+        description: >
+          AEMO's separately published price and demand series, back to 2015.
+          Feeds the climatology baseline and threshold sensitivity, never the
+          feature table. Spacing changed from 30 to 5 minutes in October 2021
+          and is recorded per row.
+        loaded_at_field: ingested_at
+
+      - name: weather_forecast
+        description: >
+          Open-Meteo archived forecasts from a named model. Unnamed, that
+          endpoint returns ERA5 reanalysis, which would be a leak.
+        loaded_at_field: ingested_at
+
+      - name: ingest_log
+        description: One row per file collected, with the vintage timestamps.
+        loaded_at_field: known_at
