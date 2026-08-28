@@ -102,6 +102,10 @@ dbt-test: dbt-install  ## Run tests only
 dbt-fresh: dbt-install  ## Source freshness. Warns when the poller is stopped
 	$(DBT) source freshness
 
+.PHONY: leakage
+leakage: install  ## Verify the feature table against raw, independently of dbt
+	$(BIN)/pytest tests/test_leakage_against_raw.py -v
+
 .PHONY: dbt-docs
 dbt-docs: dbt-install  ## Generate and serve the lineage graph
 	$(DBT) docs generate && $(DBT) docs serve

@@ -1,0 +1,96 @@
+version: 2
+
+models:
+  - name: int_dispatch_intervals
+    description: >
+      One row per dispatch interval for the region under study, with incomplete
+      days already removed so no window downstream can span an AEMO outage.
+    data_tests:
+      - unique_combination:
+          combination_of_columns: [settlement_end]
+    columns:
+      - name: settlement_end
+        data_tests: [not_null]
+      - name: rrp
+        data_tests: [not_null]
+      - name: known_at
+        data_tests: [not_null]
+
+  - name: int_p5min_forecast
+    description: AEMO's pre-dispatch for the region, indexed for as-of lookup.
+    data_tests:
+      - unique_combination:
+          combination_of_columns: [run_at, interval_end]
+    columns:
+      - name: known_at
+        data_tests: [not_null]
+      - name: interval_end
+        data_tests: [not_null]
+
+  - name: mart_spike_features
+    description: >
+      One row per prediction, anchored to the moment a dispatch price became
+      readable. Carries the provenance columns that make point-in-time
+      correctness checkable rather than assumed.
+    data_tests:
+      - unique_combination:
+          combination_of_columns: [prediction_at]
+
+      # The two invariants, asserted in SQL as well as in
+      # tests/test_no_leakage.py. Belt and braces on purpose: this is the one
+      # error that would make every downstream number meaningless while looking
+      # entirely healthy.
+      - features_not_from_the_future
+      - target_not_already_known
+
+    columns:
+      - name: prediction_at
+        description: >
+          The moment the anchor interval's price became readable. Not a clock
+          time: anchoring to publication is what makes training and serving
+          identical, and what stops an already-published interval landing in
+          the target.
+        data_tests: [not_null]
+
+      - name: anchor_settlement_end
+        description: The most recent interval whose price is known at prediction time.
+        data_tests: [not_null]
+
+      - name: target_max_rrp
+        description: >
+          Highest price over the six intervals after the anchor. Null is not
+          allowed -- a row without a complete target window is dropped rather
+          than shortened.
+        data_tests:
+          - not_null
+          - accepted_range:
+              min_value: -1000
+              max_value: 30000
+
+      - name: is_spike
+        description: Whether the target window exceeded the threshold.
+        data_tests: [not_null]
+
+      - name: benchmark_intervals
+        description: >
+          How many of the six target intervals AEMO's latest readable run
+          actually covered. Fewer than six means the benchmark is being judged
+          on a partial window, which the backtest has to account for.
+        data_tests:
+          - accepted_range:
+              min_value: 0
+              max_value: 6
+
+      - name: max_feature_known_at
+        description: Latest vintage among all contributing feature sources.
+        data_tests: [not_null]
+
+      - name: min_target_known_at
+        description: Earliest vintage among the intervals being predicted.
+        data_tests: [not_null]
+
+      - name: rolling_mean_rrp_30m
+        description: >
+          Null where the window held fewer than seven intervals. A mean over a
+          short window reported as a full one is the silent error this column's
+          companion count exists to prevent.

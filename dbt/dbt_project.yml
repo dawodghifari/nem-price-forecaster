@@ -25,7 +25,13 @@ models:
       # Views: staging is renaming, typing and filtering, so materialising it
       # would double the storage for no gain. The feature table on Day 4 is
       # where materialisation earns its keep.
-      # No +schema here. dbt appends a custom schema to the profile's, so
-      # `+schema: staging` against a profile already targeting `staging`
-      # produced `staging_staging`.
+      # No +schema anywhere in this file. dbt appends a custom schema to the
+      # profile's, so `+schema: staging` against a profile already targeting
+      # `staging` produced `staging_staging`.
       +materialized: view
+
+    intermediate:
+      +materialized: table
+
+    marts:
+      +materialized: table
