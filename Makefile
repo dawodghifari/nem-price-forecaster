@@ -106,6 +106,10 @@ dbt-fresh: dbt-install  ## Source freshness. Warns when the poller is stopped
 leakage: install  ## Verify the feature table against raw, independently of dbt
 	$(BIN)/pytest tests/test_leakage_against_raw.py -v
 
+.PHONY: baselines
+baselines: install  ## Day 5: measure the three baselines, write docs/day5_baselines.md
+	$(BIN)/python scripts/baselines.py $(ARGS)
+
 .PHONY: dbt-docs
 dbt-docs: dbt-install  ## Generate and serve the lineage graph
 	$(DBT) docs generate && $(DBT) docs serve

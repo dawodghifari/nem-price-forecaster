@@ -15,7 +15,15 @@ where = ["src"]
 pythonpath = ["src"]
 testpaths = ["tests"]
 addopts = "-q"
-filterwarnings = ["error::DeprecationWarning:nemfc.*"]
+filterwarnings = [
+    "error::DeprecationWarning:nemfc.*",
+    # A numpy RuntimeWarning is how the `-inf` tie-group bug announced itself,
+    # and it announced itself in the middle of a real run rather than in the
+    # suite. Numerical warnings are errors here for that reason: "invalid value
+    # encountered" means an array holds something the arithmetic did not expect,
+    # which in scoring code is a wrong number rather than a cosmetic complaint.
+    "error::RuntimeWarning",
+]
 
 [tool.ruff]
 line-length = 100
