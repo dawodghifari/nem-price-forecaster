@@ -167,6 +167,36 @@ def _ranked_score(score: np.ndarray) -> np.ndarray:
     return np.where(missing, np.nanmin(score) - 1.0, score)
 
 
+def onset_mask(
+    frame: pd.DataFrame,
+    threshold: float,
+    *,
+    persistence_column: str = "rolling_max_rrp_30m",
+) -> pd.Series:
+    """Rows where nothing in the trailing thirty minutes had already spiked.
+
+    Defined before any model existed, because it is the slice a model has to
+    win on and choosing it afterwards would make it a flattering cut rather
+    than a test.
+
+    Day 5 measured persistence -- "the price has already been above the
+    threshold recently" -- at 84x lift. Episodes run 3.3 intervals on average,
+    so most positives are *continuations*, and a model can post a strong
+    overall score having learned nothing except that a high price stays high.
+    Restricting to rows where persistence is silent by construction leaves the
+    forecasts that are actually forecasts.
+
+    Measured on the evaluation period: 308 of 689 positive rows are onsets, at
+    a 0.31% base rate against 0.69% overall. Genuinely the harder half.
+
+    Rows with no trailing window at all are excluded rather than included. A
+    null means the window was too short to know whether a spike preceded them,
+    and an unverifiable onset is not an onset.
+    """
+    trailing = frame[persistence_column]
+    return trailing.notna() & (trailing <= threshold)
+
+
 def rank_order(score: np.ndarray, tiebreak: np.ndarray) -> np.ndarray:
     """Indices sorted by score descending, ties broken by `tiebreak` ascending.
 

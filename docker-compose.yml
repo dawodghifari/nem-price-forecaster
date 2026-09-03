@@ -35,5 +35,27 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  api:
+    build: .
+    container_name: nemfc-api
+    ports:
+      - "${API_PORT:-8000}:8000"
+    environment:
+      # The API reaches Postgres over the compose network, not localhost.
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-nemfc}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nemfc}
+      POSTGRES_DB: ${POSTGRES_DB:-nemfc}
+      NEMFC_REGION: ${NEMFC_REGION:-NSW1}
+      TZ: UTC
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Off by default. `make api` starts it; `make up` should not require a
+    # trained model to exist.
+    profiles: ["api"]
+    restart: unless-stopped
+
 volumes:
   pgdata:

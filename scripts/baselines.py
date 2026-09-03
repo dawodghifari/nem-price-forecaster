@@ -25,7 +25,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -37,13 +37,12 @@ from nemfc.baselines import (
     persistence_score,
 )
 from nemfc.config import load_settings
+from nemfc.dataset import add_episodes, load
 from nemfc.evaluate import (
     DEFAULT_K,
     NO_EPISODE,
     ScoreCard,
-    assign_episodes,
     blocked_bootstrap_pr_auc,
-    find_episodes,
     score,
 )
 from nemfc.folds import (
@@ -53,46 +52,6 @@ from nemfc.folds import (
     describe,
     make_folds,
 )
-
-FEATURES_SQL = """
-select prediction_at, anchor_settlement_end, region_id, is_spike, target_max_rrp,
-       rrp_now, rolling_max_rrp_30m, benchmark_max_forecast_rrp, benchmark_intervals,
-       nem_hour, nem_day_of_week, nem_trading_date
-from staging.mart_spike_features
-where region_id = :region
-order by prediction_at
-"""
-
-HISTORY_SQL = """
-select settlement_end, spacing_minutes, is_spike
-from staging.stg_price_history
-where region_id = :region
-"""
-
-
-def load(engine, region: str) -> tuple[pd.DataFrame, pd.DataFrame]:
-    features = pd.read_sql(text(FEATURES_SQL), engine, params={"region": region})
-    features["prediction_at"] = pd.to_datetime(features["prediction_at"], utc=True)
-    features["anchor_settlement_end"] = pd.to_datetime(features["anchor_settlement_end"], utc=True)
-    features["is_spike"] = features["is_spike"].astype(bool)
-
-    history = pd.read_sql(text(HISTORY_SQL), engine, params={"region": region})
-    history["settlement_end"] = pd.to_datetime(history["settlement_end"], utc=True)
-    return features, history
-
-
-def add_episodes(frame: pd.DataFrame, threshold: float) -> tuple[pd.DataFrame, int]:
-    """Label each row with the episode its target window opens onto.
-
-    Spiking intervals are read off the anchors themselves -- every interval in
-    the evaluation period appears once as an anchor -- so this needs no table
-    the feature mart does not already carry.
-    """
-    spiking = frame.loc[frame["rrp_now"] > threshold, "anchor_settlement_end"]
-    episodes = find_episodes(spiking)
-    frame = frame.copy()
-    frame["episode_id"] = assign_episodes(frame["anchor_settlement_end"], spiking, episodes)
-    return frame, len(episodes)
 
 
 def build_scores(frame: pd.DataFrame, folds, shape, seed: int = 0) -> dict[str, pd.Series]:

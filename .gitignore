@@ -33,3 +33,8 @@ mlartifacts/
 .DS_Store
 .idea/
 .vscode/
+
+# Trained model artifacts. Reproduced with `make fit`; the metadata
+# sidecar records the commit each one came from.
+models/*.txt
+models/*.json

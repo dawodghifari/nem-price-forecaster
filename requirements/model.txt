@@ -1,0 +1,11 @@
+# Day 6 needs exactly one thing beyond the ingestion stack: LightGBM.
+#
+# Split out from ml.txt on purpose. MLflow, SHAP and matplotlib are Week 2
+# tools and between them pull well over a hundred packages; making a backtest
+# wait on that install is a bad trade. `make train` installs this file, and the
+# MLflow logging in scripts/train.py degrades to a no-op when MLflow is absent,
+# so the full stack can arrive later without anything changing.
+
+-r base.txt
+
+lightgbm==4.5.0

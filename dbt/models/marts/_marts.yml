@@ -27,6 +27,80 @@ models:
       - name: interval_end
         data_tests: [not_null]
 
+  - name: int_dispatch_intervals_live
+    description: >
+      Serving-path dispatch intervals: the last few days, with no completeness
+      filter. The current day is always incomplete, so the training filter
+      would leave the freshest prediction more than a day stale.
+    data_tests:
+      - unique_combination:
+          combination_of_columns: [settlement_end]
+    columns:
+      - name: settlement_end
+        data_tests: [not_null]
+      - name: known_at
+        data_tests: [not_null]
+
+  - name: int_p5min_forecast_live
+    description: >
+      AEMO's pre-dispatch for the serving path, as a view over recent runs. A
+      table here would freeze the benchmark at the last build, which is how the
+      first live prediction came back with a null AEMO forecast.
+    data_tests:
+      - unique_combination:
+          combination_of_columns: [run_at, interval_end]
+    columns:
+      - name: known_at
+        data_tests: [not_null]
+      - name: interval_end
+        data_tests: [not_null]
+
+  - name: int_feature_rows
+    description: >
+      Every feature, no target. Shared by the training mart and the live mart so
+      the two cannot drift -- a serving path whose features diverge from the
+      training path is how a model that backtested well fails in production.
+    data_tests:
+      - unique_combination:
+          combination_of_columns: [prediction_at]
+      - features_not_from_the_future
+    columns:
+      - name: prediction_at
+        data_tests: [not_null]
+      - name: anchor_settlement_end
+        data_tests: [not_null]
+      - name: max_feature_known_at
+        data_tests: [not_null]
+
+  - name: int_feature_rows_live
+    description: >
+      The same feature definition over the unfiltered recent window.
+
+      Deliberately untested here. `features_not_from_the_future` and the
+      uniqueness check on this model took 8,452 and 2,695 seconds respectively,
+      because each scans every live row and each row triggers the benchmark
+      lateral. Both invariants are asserted on `mart_spike_features` over the
+      full 108,272-row training set, where they are cheap and where a violation
+      would actually matter. Re-asserting them on a ten-day window every serving
+      refresh bought nothing and cost hours.
+
+  - name: mart_live_features
+    description: >
+      What the API scores. Rows whose outcome has not happened yet, which is
+      exactly what mart_spike_features filters out. No target columns at all, so
+      nothing downstream can mistake an ungraded row for a negative one.
+    data_tests:
+      - features_not_from_the_future
+    columns:
+      - name: prediction_at
+        data_tests: [not_null]
+      - name: age
+        description: >
+          Wall-clock staleness, computed in SQL so the API reports it rather
+          than deriving it and getting the timezone wrong. Roughly two minutes
+          on a healthy poller.
+        data_tests: [not_null]
+
   - name: mart_spike_features
     description: >
       One row per prediction, anchored to the moment a dispatch price became

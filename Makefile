@@ -110,6 +110,47 @@ leakage: install  ## Verify the feature table against raw, independently of dbt
 baselines: install  ## Day 5: measure the three baselines, write docs/day5_baselines.md
 	$(BIN)/python scripts/baselines.py $(ARGS)
 
+.PHONY: model-install
+model-install: install  ## Add LightGBM to the virtualenv
+	$(BIN)/pip install -q -r requirements/model.txt
+
+.PHONY: train
+train: model-install  ## Day 6: train, backtest, write docs/day6_model.md
+	$(BIN)/python scripts/train.py $(ARGS)
+
+.PHONY: fit
+fit: model-install  ## Fit the served model on all data, write models/
+	$(BIN)/python scripts/fit_production.py $(ARGS)
+
+.PHONY: serve-install
+serve-install: install  ## Add the serving dependencies
+	$(BIN)/pip install -q -r requirements/serve.txt
+
+.PHONY: serve
+serve: serve-install  ## Run the API locally on :8000
+	$(BIN)/uvicorn nemfc.serve:app --app-dir src --reload --port 8000
+
+.PHONY: refresh-serving
+refresh-serving: dbt-install  ## Rebuild the serving models. Seconds; run on the poller's cadence
+	$(DBT) run --select tag:serving
+
+.PHONY: api
+api:  ## Build and run the API container, waiting until it answers
+	docker compose up -d --build api
+	@printf 'waiting for the API'
+	@for i in $$(seq 1 40); do \
+	  if curl -sf -o /dev/null http://localhost:$${API_PORT:-8000}/health; then \
+	    echo " ready"; exit 0; fi; \
+	  printf '.'; sleep 1; done; \
+	echo " gave up after 40s"; docker compose logs --tail=40 api; exit 1
+	@echo "API: http://localhost:$${API_PORT:-8000}/docs"
+
+.PHONY: smoke
+smoke:  ## Phase 1 exit condition: a live prediction from real data
+	@curl -sf http://localhost:$${API_PORT:-8000}/health | python3 -m json.tool
+	@echo
+	@curl -sf http://localhost:$${API_PORT:-8000}/forecast/latest | python3 -m json.tool
+
 .PHONY: dbt-docs
 dbt-docs: dbt-install  ## Generate and serve the lineage graph
 	$(DBT) docs generate && $(DBT) docs serve

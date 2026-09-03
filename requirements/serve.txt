@@ -1,0 +1,8 @@
+# The serving path. Separate from model.txt because the API container has no
+# reason to carry a training stack, and separate from base.txt because the
+# poller and the backfill have no reason to carry a web server.
+
+-r model.txt
+
+fastapi==0.115.4
+uvicorn[standard]==0.32.0

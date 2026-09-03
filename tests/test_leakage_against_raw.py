@@ -216,3 +216,26 @@ def test_every_feature_source_predates_the_prediction(sample):
     """The feature-side invariant, over the sample."""
     late = sample[sample["max_feature_known_at"] > sample["prediction_at"]]
     assert late.empty, f"{len(late)} rows carry a feature published after prediction time"
+
+
+def test_the_mart_supplies_every_column_the_model_asks_for(engine):
+    """The check whose absence killed the first Day 6 run.
+
+    The loader named nine columns; the model asked for thirty-seven; the
+    backtest died on the first fold. No offline test could see it, because the
+    synthetic fixtures fabricate any column that is missing -- which is exactly
+    the assumption that was wrong.
+
+    So this asks the warehouse. It is the only place the real column set and the
+    real feature list meet, and a column renamed or dropped in dbt now fails
+    here rather than several minutes into a training run.
+    """
+    from nemfc.model import BASE_FEATURES, BENCHMARK_FEATURES
+
+    available = set(
+        pd.read_sql(text("select * from staging.mart_spike_features limit 0"), engine).columns
+    )
+    wanted = set(BASE_FEATURES) | set(BENCHMARK_FEATURES)
+
+    missing = sorted(wanted - available)
+    assert not missing, f"the model asks for columns the mart does not have: {missing}"
