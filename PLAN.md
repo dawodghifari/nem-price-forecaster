@@ -7,49 +7,21 @@
 > 3. **The weather source in rev 1's §8 was the reanalysis API** — observed conditions reconstructed after the fact, which is exactly the leakage §4.1 exists to prevent. Corrected to the Historical Forecast API throughout.
 > 4. **The stated edge was never built.** Rev 1 argued AEMO under-predicts spikes caused by rebidding, then used no bid data. `Bidmove_Complete` and `Dispatch_SCADA` are both live in the NEMWeb archive (verified 17 Aug 2026). Bid-stack features are now Phase 2's headline, structured as a clean ablation — see §3.3.
 >
-> Also fixed: a leak in the battery charging rule (§2.2), an optimistic Airflow estimate (§5), and CV bullets that violated the writing standard locked 12 Aug (§6).
+> Also fixed: a leak in the battery charging rule (§2.2) and an optimistic Airflow estimate (§5).
 
-**Status:** planning, not started. Rev 1 written 3 Aug 2026, rev 2 17 Aug 2026.
+**Status:** Phase 1 complete (3 Sep 2026); Phases 2 to 6 not started. This is the plan as written before the build, kept so its reasoning survives; where the build proved it wrong, the README says so. Rev 1 written 3 Aug 2026, rev 2 17 Aug 2026.
 **Repo name:** `nem-price-forecaster`
-**Target:** AI/ML Engineer and Machine Learning Engineer roles, Australia, graduate to ~2 years.
-**Budget:** 2 weeks intense. A defensible, demonstrable system exists at end of Day 7; Days 8–14 are the parts that make it a flagship.
+**Budget:** 2 weeks intense. A defensible, demonstrable system exists at end of Day 7; Days 8–14 add the bid-stack ablation, operations and the economic backtest.
 
 ---
 
-## 1. Why this project
-
-### 1.1 The gap it fills
-
-The existing portfolio (Fleet Copilot, NetOps LLM Analyst, filing-intelligence, AWS serverless inference, Edge Reliability Lab) covers LLM/RAG/agents, cloud deployment of a model, and platform reliability. It does not cover:
-
-| Requirement, seen repeatedly in AU ML ads | Currently in portfolio |
-|---|---|
-| Upstream data engineering — orchestration, transformation, warehouse modelling (Airflow, dbt, Spark, Databricks, Snowflake) | none |
-| Model registry, versioning, champion/challenger promotion (MLflow) | none |
-| Drift detection and automated retraining | none |
-| Backtest / experiment design against a real baseline | none |
-| Real, continuously arriving data | none — LLM projects use synthetic telemetry |
-| A quantified decision outcome, not just a metric | none |
-
-Evidence for the demand side: Xero's ML Systems ad lists Airflow, MLflow, Spark, Prefect, PyTorch. Macquarie's ML Platform Engineer lists Vertex AI / SageMaker plus data engineering. Canva's recsys ads ask for "training pipelines, evaluation, and serving" and "online and offline experiments to validate model performance". Hiring commentary is consistent that the common portfolio failure is stopping at deploy and never demonstrating post-deployment ownership.
-
-A fourth LLM project would add little. This one adds six things at once.
-
-### 1.2 Why energy market data specifically
+## 1. Why this dataset
 
 - **Free and unambiguously licensed.** AEMO's Copyright Permissions Notice grants "general permission for anyone to use AEMO Material for any purpose" with attribution, and states "You do not need to obtain specific permission". No key, no registration, no non-commercial clause.
 - **It genuinely arrives.** `nemweb.com.au/Reports/Current/DispatchIS_Reports/` publishes a new file every 5 minutes — verified from directory timestamps, not documentation. Drift and retraining are real problems here, not staged ones.
-- **There is an incumbent forecast to benchmark against.** AEMO publishes its own 5-minute pre-dispatch (`P5_Reports`) and 30-minute pre-dispatch. Having a published production baseline to compare against is rare in a portfolio project and is worth more in an interview than the model itself.
+- **There is an incumbent forecast to benchmark against.** AEMO publishes its own 5-minute pre-dispatch (`P5_Reports`) and 30-minute pre-dispatch. Having a published production baseline to compare against is rare, and it is worth more than the model itself.
 - **A real decision hangs off it.** Five-minute spot price sets battery and VPP dispatch, demand-response triggering, and hedging. Prices range from −$1,000 to $17,500/MWh. The output converts directly to dollars.
-- **The EE degree becomes an asset.** This is machine learning on market time series, not power engineering. But being able to explain why prices spike — a unit trips, an interconnector binds, evening ramp meets low wind — is domain credibility most applicants do not have.
-
-### 1.3 The framing risk, and how to handle it
-
-The pivot away from power engineering (1 Jun 2026) was deliberate and this project touches an energy dataset. Handle it explicitly:
-
-- The CV bullet leads with the **system**, not the sector: "production ML pipeline — ingestion, dbt transforms, MLflow registry, automated retraining with a promotion gate, drift monitoring — on a live 5-minute market data feed."
-- The dataset is a choice justified by its properties (live, licensed, benchmarked), not by sector interest. Say that if asked.
-- Do not put it under an "energy" heading anywhere.
+- **The mechanics are explainable.** Prices spike for physical reasons: a unit trips, an interconnector binds, the evening ramp meets low wind. Features can be built from those causes rather than from price history alone.
 
 ---
 
@@ -79,7 +51,7 @@ Three, in increasing order of difficulty:
 2. **The decision is a 5-minute decision.** Spot price is set every 5 minutes and battery dispatch responds at that cadence. A 30-minute forecast answers a question nobody asks.
 3. **Half the features do not exist at 30 minutes.** Interconnector binding, ramp rate, and available-generation headroom are dispatch-interval quantities. Aggregating them to 30 minutes averages away the thing that causes the spike.
 
-**The cost of this choice, stated up front:** 13 months contains exactly one summer, and spikes concentrate in summer. The model is therefore fitted to one season's worth of extreme events. This is a real limitation and belongs in the README rather than in a footnote. It also sets up an honest answer to the obvious interview question, which is better than pretending ten years of data was available at the resolution that mattered.
+**The cost of this choice, stated up front:** 13 months contains exactly one summer, and spikes concentrate in summer. The model is therefore fitted to one season's worth of extreme events. This is a real limitation and belongs in the README rather than in a footnote.
 
 **The 30-minute history to 2015 is still worth ingesting, for three things it is genuinely better at:**
 
@@ -96,7 +68,7 @@ Rev 1 specified walk-forward with 1-week test folds. Do the arithmetic first: ~1
 Rules, fixed before any model is trained:
 
 - **Fold by event, not by calendar.** Expanding-window walk-forward where each test fold is sized to contain a minimum number of spike episodes rather than a fixed number of days.
-- **Pool predictions, then score once.** Concatenate out-of-fold predictions across the whole backtest and compute one PR-AUC on the pooled set. Averaging per-fold metrics over folds with wildly different positive counts is the wrong estimator and is easy to attack in an interview.
+- **Pool predictions, then score once.** Concatenate out-of-fold predictions across the whole backtest and compute one PR-AUC on the pooled set. Averaging per-fold metrics over folds with wildly different positive counts is the wrong estimator.
 - **Report the denominator everywhere.** Every metric in the README carries the number of positive episodes behind it. "PR-AUC 0.41 over 137 spike episodes" is a defensible sentence; "PR-AUC 0.41" alone is not.
 - **Confidence intervals by blocked bootstrap.** Resample contiguous blocks, not individual intervals, because neighbouring intervals are not independent. If the interval around the model overlaps the interval around AEMO, say so plainly rather than claiming a win.
 - **Purge gap between train and test** to stop rolling-window features straddling the boundary.
@@ -112,13 +84,11 @@ Metrics alone stop short. Convert the probability into a dispatch policy and bac
 - Report annualised revenue for: perfect foresight (ceiling), your model, AEMO P5MIN policy, and always-charge-overnight-discharge-evening (naive).
 - Sweep τ and show the revenue/false-alarm trade-off.
 
-This is the section that turns a metrics exercise into a flagship. It also demonstrates the "translate model output into a business decision" skill that the AU consultancy-heavy junior market weights heavily.
-
 ---
 
 ## 3. Architecture
 
-Local-first, Docker Compose, no cloud bill — same pattern as `edge-reliability-lab`, which means a recruiter can clone and run it.
+Local-first, Docker Compose, no cloud bill — same pattern as `edge-reliability-lab`, so anyone can clone and run it.
 
 ```
 NEMWeb (5-min ZIP)  ─┐
@@ -145,15 +115,15 @@ AEMO monthly CSVs   ─┘                    │
 
 | Layer | Choice | Why this one |
 |---|---|---|
-| Ingestion | Python + `httpx`, own MMS parser | Writing the parser yourself is the point — it is real messy-data work and good interview material |
+| Ingestion | Python + `httpx`, own MMS parser | MMS files are nested multi-table flat files whose columns change between versions; owning the parser means owning the schema checks |
 | Backfill | `nemosis` package for long history | Legitimate use of a maintained library; do not hand-roll 27 years of parsing |
-| Storage | Postgres 16 | Named in more ads than DuckDB; dbt-postgres is mature |
-| Transform | **dbt-core** | Directly fills the AU data-platform gap; cheap to learn; gives you tests and lineage for free |
-| Orchestration | **Airflow 3** (Docker Compose) | Most-named orchestrator in AU ads. Heavier than Prefect but more recognised |
-| Model | **LightGBM** | Wins on tabular time series, trains in seconds, is what a real team would use. Do not reach for a transformer to look impressive |
-| Tracking/registry | **MLflow** | Most-named MLOps tool in the ads researched |
+| Storage | Postgres 16 | Handles a concurrent writer (the poller) and readers (dbt, the API); dbt-postgres is mature |
+| Transform | **dbt-core** | SQL transformations with tests and lineage built in |
+| Orchestration | **Airflow 3** (Docker Compose) | Scheduling with retries and backfills; heavier than Prefect |
+| Model | **LightGBM** | Strong on tabular time series and trains in seconds; a transformer would add cost with no reason to expect a gain here |
+| Tracking/registry | **MLflow** | Experiment tracking plus a model registry for the promotion gate |
 | Serving | FastAPI + Docker | Consistent with existing work; measure and report p99 |
-| Monitoring | Prometheus + Grafana | Reuse the Edge Reliability Lab stack — you already know it, so it costs you a day not a week |
+| Monitoring | Prometheus + Grafana | Same stack as `edge-reliability-lab`, so the alerting patterns carry over |
 | CI | GitHub Actions | ruff + pytest + `dbt build` against a test schema + docker build |
 
 ### 3.2 Features
@@ -212,7 +182,7 @@ NEMWeb ZIPs contain AEMO MMS flat files — a nested `C`/`I`/`D` record layout w
 
 - **Archive retention is ~13 months.** `Reports/Archive/DispatchIS_Reports/` currently holds daily rollups from Jul 2025 to Jul 2026 only. So: use the **30-minute Aggregated Price and Demand CSVs (Dec 1998 →, `aemo.com.au/aemo/data/nem/priceanddemand/PRICE_AND_DEMAND_YYYYMM_NSW1.csv`)** for long history, and 5-minute data for the recent window. Be explicit in the README that the high-resolution training window is ~13 months.
 - **Data volume.** ~5.5 MB/day compressed for the DISPATCHIS archive; 13 months ≈ 2 GB. Fine locally, but do not commit it — `.gitignore` the data directory and ship a `make backfill` instead.
-- **Open-Meteo free tier is non-commercial** and capped at 10,000 calls/day, 300,000/month. A portfolio project sits inside those terms. Do not use BOM: their terms explicitly prohibit scraping and redistribution.
+- **Open-Meteo free tier is non-commercial** and capped at 10,000 calls/day, 300,000/month. A non-commercial project sits inside those terms. Do not use BOM: their terms explicitly prohibit scraping and redistribution.
 - **Attribution.** README must credit AEMO (data © AEMO) and Open-Meteo (CC BY 4.0).
 
 ---
@@ -232,7 +202,7 @@ Rev 1 was a fourteen-day calendar. Two of its estimates were wrong — Airflow i
 | **5. Orchestration** | Airflow DAGs | DAGs green, screenshot | 2 days |
 | **6. Ship** | CI, `make demo`, README, case study, public push | Clean clone runs | 1–2 days |
 
-**Phase 5 is last on purpose, and this is a change from rev 1.** Airflow is the most recognised orchestrator in Australian ads, which is why it is here at all — but it demonstrates tooling familiarity, while phases 2 to 4 are the ones that demonstrate judgement. If the fortnight compresses, a project with a measured bid-feature ablation and an honest economic backtest orchestrated by a Makefile beats a project with three green DAGs and neither. Run the pipeline from `make` until Airflow is earned.
+**Phase 5 is last on purpose, and this is a change from rev 1.** Airflow demonstrates tooling, while phases 2 to 4 are the ones that demonstrate judgement. If the fortnight compresses, a project with a measured bid-feature ablation and an honest economic backtest orchestrated by a Makefile beats a project with three green DAGs and neither. Run the pipeline from `make` until Airflow is earned.
 
 ### Phase 1 detail — a working pipeline
 
@@ -260,37 +230,15 @@ Rev 1 was a fourteen-day calendar. Two of its estimates were wrong — Airflow i
 
 ---
 
-## 6. What this earns on the CV
-
-Draft bullets, to be trimmed per role. These are written to be true only once the corresponding day is complete — do not use them before then.
-
-Rewritten rev 2 against `CV/Writing_Standard.md`. Rev 1's version opened with "end-to-end forecasting system" (now banned) and ran a nine-item tool list as its first bullet, which reads as a stack inventory rather than as work. Rules applied: plain verbs, one claim per bullet, every adjective replaced by the number that earned it, and no bullet written before the phase that makes it true.
-
-> **NEM Price Spike Forecaster** — forecasting price spikes on a live 5-minute electricity market feed
-> - Forecasts the probability that the NSW spot price exceeds $300/MWh in the next 30 minutes, from AEMO's 5-minute dispatch feed. Ingestion parses AEMO MMS flat files, dbt builds the transformation layer in Postgres, LightGBM does the modelling, FastAPI serves it, and Docker Compose brings the whole thing up on one command.
-> - Measured against AEMO's own published pre-dispatch forecast, not a toy baseline: [result over N spike episodes].
-> - Built features from the bid stack — capacity offered below the threshold, and how it moved since the last pre-dispatch run — to test whether rebidding explains the forecasts AEMO misses: [result].
-> - Converted the probability into a battery dispatch policy and backtested it: [revenue] against [perfect foresight ceiling].
-> - Retrains weekly behind a promotion gate in the MLflow registry. A new model ships only when it beats the incumbent on a held-out recent window; [N] challengers were rejected.
-> - Tracks feature drift, prediction drift and feed staleness in Prometheus, each alert wired to a runbook.
-> - [Leakage finding] — found by writing the point-in-time correctness test before training anything.
-
-**Bracketed slots are results that do not exist yet. Do not write around them, and do not use a bullet before its phase is complete.** The last bullet is deliberately about a bug found; that shape worked in the Edge Reliability Lab (exemplars pointing at traces that were never exported) and it is the strongest interview material either project produced.
-
-**Which bullets to lead with, by role.** ML engineer: the benchmark bullet and the bid-stack bullet. Data engineer: ingestion, dbt, and drift. Quant: the economic backtest and the leakage test.
-
----
-
-## 7. Open decisions
+## 6. Open decisions
 
 - **Region scope.** Start NSW1 only. Extend to all five regions only if Week 2 has slack — cross-region features (interconnector coupling) are interesting but are a Week 3 problem.
 - **Threshold.** $300 to start; report sensitivity.
 - **Horizon.** 30 minutes to start. 60 minutes is more useful operationally and harder; consider as a second target once the 30-min pipeline works.
-- **Whether to add a small LLM narration layer.** Recommendation: no. It would dilute the ML-engineering story, and there are already three LLM projects in the portfolio. Revisit only after Day 14.
 
 ---
 
-## 8. Sources
+## 7. Sources
 
 - AEMO NEMWeb current reports — https://nemweb.com.au/Reports/Current
 - AEMO NEMWeb archive — https://nemweb.com.au/Reports/Archive
