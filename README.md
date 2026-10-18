@@ -27,6 +27,11 @@ Pooled over 116 spike episodes across 39 days (683 positive rows in 99,704):
 | Random *(control)* | 0.007 | 0.004–0.010 | 0.010 | 2 |
 | Shuffled labels *(control)* | 0.007 | 0.004–0.013 | 0.000 | 0 |
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/figures/results-dark.png">
+  <img src="docs/figures/results-light.png" alt="PR-AUC with 95% blocked-bootstrap intervals for each score. On all rows the model scores 0.498 and AEMO pre-dispatch 0.356, and the intervals overlap. On onset rows the model scores 0.108 and AEMO 0.090, with wide overlapping intervals.">
+</picture>
+
 The model leads on every metric, and the confidence intervals overlap from 0.342
 to 0.483. On 116 episodes that difference cannot be certified, so it is not
 claimed. What can be stated as a count rather than an estimate: given a budget of
@@ -97,6 +102,37 @@ plan's stated limitation was wrong, and correcting it mattered more than any
 tuning.
 
 ## How it is built
+
+```mermaid
+flowchart LR
+    subgraph src [Sources]
+        NW["NEMWeb<br>dispatch + AEMO P5MIN pre-dispatch"]
+        AG["AEMO aggregated<br>30-min history"]
+        OM["Open-Meteo<br>archived forecasts"]
+    end
+    subgraph ing [Ingest]
+        BF["backfill.py<br>~13-month archive"]
+        PL["poll.py<br>live, every 5 min"]
+    end
+    RAW[("Postgres raw<br>append-only,<br>3 vintage timestamps")]
+    subgraph dbt [dbt: one feature macro, two callers]
+        STG["staging<br>7 models"]
+        INT["intermediate<br>6 models"]
+        TR["mart_spike_features<br>graded training rows"]
+        LV["mart_live_features<br>rows not yet graded"]
+    end
+    BT["baselines.py + train.py<br>walk-forward backtest<br>docs/day5, docs/day6"]
+    FIT["fit_production.py<br>model + metadata"]
+    API["FastAPI<br>/forecast/latest"]
+
+    NW --> BF & PL
+    AG & OM --> BF
+    BF & PL --> RAW --> STG --> INT
+    INT --> TR & LV
+    TR --> BT
+    TR --> FIT --> API
+    LV --> API
+```
 
 | | |
 |---|---|
@@ -211,3 +247,4 @@ ERA5, `ecmwf_ifs025` returned 0.586.
 - [docs/CONVENTIONS.md](docs/CONVENTIONS.md) — UTC storage, vintage timestamps, intervention pricing
 - [docs/day5_baselines.md](docs/day5_baselines.md) — generated, not hand-edited
 - [docs/day6_model.md](docs/day6_model.md) — generated, not hand-edited
+- `docs/figures/` is drawn from that report by `scripts/plot_results.py` (needs matplotlib, in `requirements/ml.txt`)
