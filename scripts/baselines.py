@@ -83,7 +83,7 @@ def _markdown_table(frame: pd.DataFrame) -> str:
         for value in row:
             if isinstance(value, pd.Timestamp):
                 cells.append(f"{value:%Y-%m-%d %H:%M}")
-            elif isinstance(value, (int, np.integer)):
+            elif isinstance(value, int | np.integer):
                 cells.append(f"{value:,}")
             else:
                 cells.append(str(value))

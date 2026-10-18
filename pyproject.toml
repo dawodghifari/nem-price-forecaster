@@ -35,4 +35,6 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 ignore = ["E501"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["B011"]
+# E402: tests call pytest.importorskip() before importing the optional stack it
+# guards, so those imports have to come after it.
+"tests/*" = ["B011", "E402"]

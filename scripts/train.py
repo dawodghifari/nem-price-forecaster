@@ -98,7 +98,7 @@ def _table(frame: pd.DataFrame) -> str:
                 cells.append(f"{value:%Y-%m-%d %H:%M}")
             elif isinstance(value, float):
                 cells.append(f"{value:,.4f}")
-            elif isinstance(value, (int, np.integer)):
+            elif isinstance(value, int | np.integer):
                 cells.append(f"{value:,}")
             else:
                 cells.append(str(value))

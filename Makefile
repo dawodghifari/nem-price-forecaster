@@ -40,7 +40,7 @@ verify: install  ## Day 1 exit condition: confirm the MMS layout against live fi
 	$(BIN)/python scripts/verify_formats.py
 
 .PHONY: test
-test: install  ## Run the offline test suite
+test: serve-install  ## Run the offline test suite (same as CI; no database needed)
 	$(BIN)/pytest
 
 .PHONY: lint

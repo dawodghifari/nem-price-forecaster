@@ -345,7 +345,7 @@ def iter_mms_zip(
     A daily archive rollup holds 288 members. Yielding them lets the caller
     load and release each one instead of holding a day in memory.
     """
-    label = str(source) if isinstance(source, (str, Path)) else "<stream>"
+    label = str(source) if isinstance(source, str | Path) else "<stream>"
     for name, payload in _iter_csv_members(zipfile.ZipFile(source)):
         text = payload.decode("utf-8", errors="replace")
         yield parse_mms_text(text, source_name=f"{Path(label).name}!{name}", tables=tables)
@@ -356,7 +356,7 @@ def read_mms_zip(
     tables: Collection[str] | None = None,
 ) -> list[MMSFile]:
     """Parse every MMS file inside a zip, including nested archive rollups."""
-    label = str(source) if isinstance(source, (str, Path)) else "<stream>"
+    label = str(source) if isinstance(source, str | Path) else "<stream>"
     parsed = list(iter_mms_zip(source, tables=tables))
     if not parsed:
         raise ValueError(f"no MMS members found in {label}")
