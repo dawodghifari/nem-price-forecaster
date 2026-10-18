@@ -104,33 +104,27 @@ tuning.
 ## How it is built
 
 ```mermaid
-flowchart LR
-    subgraph src [Sources]
-        NW["NEMWeb<br>dispatch + AEMO P5MIN pre-dispatch"]
-        AG["AEMO aggregated<br>30-min history"]
-        OM["Open-Meteo<br>archived forecasts"]
-    end
-    subgraph ing [Ingest]
-        BF["backfill.py<br>~13-month archive"]
-        PL["poll.py<br>live, every 5 min"]
-    end
-    RAW[("Postgres raw<br>append-only,<br>3 vintage timestamps")]
-    subgraph dbt [dbt: one feature macro, two callers]
-        STG["staging<br>7 models"]
-        INT["intermediate<br>6 models"]
-        TR["mart_spike_features<br>graded training rows"]
-        LV["mart_live_features<br>rows not yet graded"]
-    end
-    BT["baselines.py + train.py<br>walk-forward backtest<br>docs/day5, docs/day6"]
-    FIT["fit_production.py<br>model + metadata"]
-    API["FastAPI<br>/forecast/latest"]
+flowchart TB
+    NW["NEMWeb: dispatch + AEMO P5MIN pre-dispatch"]
+    AG["AEMO aggregated 30-min history"]
+    OM["Open-Meteo archived forecasts"]
+    BF["backfill.py: ~13-month archive"]
+    PL["poll.py: live, every 5 min"]
+    RAW[("Postgres raw layer: append-only, 3 vintage timestamps per row")]
+    STG["dbt staging: 7 models"]
+    INT["dbt intermediate: 6 models, one feature macro"]
+    TR["mart_spike_features: graded training rows"]
+    LV["mart_live_features: rows not yet graded"]
+    BT["baselines.py + train.py: walk-forward backtest"]
+    FIT["fit_production.py: model + metadata"]
+    API["FastAPI: /forecast/latest"]
 
     NW --> BF & PL
     AG & OM --> BF
     BF & PL --> RAW --> STG --> INT
     INT --> TR & LV
-    TR --> BT
-    TR --> FIT --> API
+    TR --> BT & FIT
+    FIT --> API
     LV --> API
 ```
 
