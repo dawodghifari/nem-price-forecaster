@@ -1,5 +1,7 @@
 # NEM Price Spike Forecaster
 
+![CI](https://github.com/dawodghifari/nem-price-forecaster/actions/workflows/ci.yml/badge.svg)
+
 Forecasting the probability that the NSW spot electricity price exceeds
 $300/MWh in the next 30 minutes, from AEMO's live five-minute dispatch feed,
 measured against AEMO's own published pre-dispatch forecast.
@@ -107,7 +109,7 @@ tuning.
 | Evaluation | Episode-aware scoring written by hand — average precision, precision@k, episode recall, blocked bootstrap |
 | Backtest | Expanding-window folds sized by spiking days, 24-hour purge gap, pooled scoring |
 | Serving | FastAPI scoring a warehouse row, containerised |
-| Tests | 178 Python, ~70 dbt data tests, plus integration checks against the database |
+| Tests | 187 Python (179 run offline; 7 need the populated warehouse, 1 needs MLflow), 69 dbt data tests |
 
 ### Point-in-time correctness
 
@@ -157,10 +159,16 @@ scripts exit non-zero if any control misses.
 
 ## Running it
 
+**Without the data:** `make test` runs the offline suite, 179 tests in about 20 seconds with no
+database and no download. CI runs it on every push, alongside `ruff`, `dbt parse` and a build
+of the API image.
+
+**The full pipeline:**
+
 ```bash
 cp .env.example .env
 make up                # Postgres 16 + Adminer
-make backfill          # ~13 months of NEMWeb archive
+make backfill          # ~13 months of NEMWeb archive, ~23 GB of downloads
 make poll              # live 5-minute poller, leave running
 make dbt-build         # staging, features, ~70 data tests
 make baselines         # writes docs/day5_baselines.md
