@@ -27,6 +27,11 @@ Pooled over 116 spike episodes across 39 days (683 positive rows in 99,704):
 | Random *(control)* | 0.007 | 0.004–0.010 | 0.010 | 2 |
 | Shuffled labels *(control)* | 0.007 | 0.004–0.013 | 0.000 | 0 |
 
+<sub>Baseline rows are from `docs/day5_baselines.md` and model rows from
+`docs/day6_model.md`. Both bootstrap the same rows with the same seed, but the
+day 6 run drew 500 resamples to day 5's 1,000, so it puts AEMO at 0.222 to 0.484
+(the figure below uses those). `scripts/train.py` now defaults to 1,000 as well.</sub>
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/figures/results-dark.png">
   <img src="docs/figures/results-light.png" alt="PR-AUC with 95% blocked-bootstrap intervals for each score. On all rows the model scores 0.498 and AEMO pre-dispatch 0.356, and the intervals overlap. On onset rows the model scores 0.108 and AEMO 0.090, with wide overlapping intervals.">
@@ -232,8 +237,10 @@ Open-Meteo, CC BY 4.0.
 Weather uses Open-Meteo's **historical forecast** API with an explicitly named
 model. Unspecified, that endpoint returns ERA5 reanalysis — data that did not
 exist at prediction time — which would make every weather feature a leak. The
-difference was measured, not assumed: unnamed returned 0.000 °C deviation from
-ERA5, `ecmwf_ifs025` returned 0.586.
+difference was measured, not assumed, over two separate 72-hour windows: unnamed
+matched ERA5 to 0.000 °C both times, while `ecmwf_ifs025` differed by 0.586 °C
+(26 to 28 July, `docs/CONVENTIONS.md`) and 0.499 °C (31 July to 2 August,
+`docs/day2_weather_findings.md`).
 
 ## Design notes
 

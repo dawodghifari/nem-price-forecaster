@@ -258,7 +258,10 @@ def main() -> int:
     parser.add_argument(
         "--min-train-spiking-days", type=int, default=DEFAULT_MIN_TRAIN_SPIKING_DAYS
     )
-    parser.add_argument("--resamples", type=int, default=500)
+    # Same count as scripts/baselines.py. With the same seed and rows but 500
+    # draws here and 1,000 there, the two reports disagreed in the third decimal
+    # on AEMO's interval (0.222-0.484 against 0.219-0.483).
+    parser.add_argument("--resamples", type=int, default=1000)
     parser.add_argument("--out", type=Path, default=Path("docs/day6_model.md"))
     parser.add_argument(
         "--skip-shuffle-control",

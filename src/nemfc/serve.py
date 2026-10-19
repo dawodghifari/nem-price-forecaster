@@ -64,7 +64,9 @@ STALE_AFTER = timedelta(minutes=15)
 #: useful at sixty. Failing fast turns an invisible pile-up into a visible 503.
 STATEMENT_TIMEOUT_MS = 10_000
 
-LATEST_SQL = "select * from staging.mart_live_features limit 1"
+#: Ordered here, not only inside the view: Postgres does not promise to keep a
+#: view's ORDER BY through an outer LIMIT.
+LATEST_SQL = "select * from staging.mart_live_features order by prediction_at desc limit 1"
 COLUMNS_SQL = "select * from staging.mart_live_features limit 0"
 
 
