@@ -29,6 +29,11 @@ Pooled over 116 spike episodes across 39 days (683 positive rows in 99,704):
 | Random *(control)* | 0.007 | 0.004–0.010 | 0.010 | 2 |
 | Shuffled labels *(control)* | 0.007 | 0.004–0.013 | 0.000 | 0 |
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/figures/results-dark.png">
+  <img src="docs/figures/results-light.png" alt="PR-AUC with 95% blocked-bootstrap intervals for each score. On all rows the model scores 0.498 and AEMO pre-dispatch 0.356, and the intervals overlap. On onset rows the model scores 0.108 and AEMO 0.090, with wide overlapping intervals.">
+</picture>
+
 The model leads on every metric, and the confidence intervals overlap from 0.342
 to 0.483. On 116 episodes that difference cannot be certified, so it is not
 claimed. What can be stated as a count rather than an estimate: given a budget of
@@ -99,6 +104,31 @@ plan's stated limitation was wrong, and correcting it mattered more than any
 tuning.
 
 ## How it is built
+
+```mermaid
+flowchart TB
+    NW["NEMWeb: dispatch + AEMO P5MIN pre-dispatch"]
+    AG["AEMO aggregated 30-min history"]
+    OM["Open-Meteo archived forecasts"]
+    BF["backfill.py: ~13-month archive"]
+    PL["poll.py: live, every 5 min"]
+    RAW[("Postgres raw layer: append-only, 3 vintage timestamps per row")]
+    STG["dbt staging: 7 models"]
+    INT["dbt intermediate: 6 models, one feature macro"]
+    TR["mart_spike_features: graded training rows"]
+    LV["mart_live_features: rows not yet graded"]
+    BT["baselines.py + train.py: walk-forward backtest"]
+    FIT["fit_production.py: model + metadata"]
+    API["FastAPI: /forecast/latest"]
+
+    NW --> BF & PL
+    AG & OM --> BF
+    BF & PL --> RAW --> STG --> INT
+    INT --> TR & LV
+    TR --> BT & FIT
+    FIT --> API
+    LV --> API
+```
 
 | | |
 |---|---|
@@ -219,3 +249,4 @@ ERA5, `ecmwf_ifs025` returned 0.586.
 - [docs/CONVENTIONS.md](docs/CONVENTIONS.md) — UTC storage, vintage timestamps, intervention pricing
 - [docs/day5_baselines.md](docs/day5_baselines.md) — generated, not hand-edited
 - [docs/day6_model.md](docs/day6_model.md) — generated, not hand-edited
+- `docs/figures/` is drawn from that report by `scripts/plot_results.py` (needs matplotlib, in `requirements/ml.txt`)
